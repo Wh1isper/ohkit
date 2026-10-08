@@ -35,3 +35,32 @@ def test_privileged_pr_automation_only_loads_base_code():
     assert checkout["with"]["persist-credentials"] is False
     labels = workflow("pr-labels.yml")
     assert not any("checkout" in step.get("uses", "") for job in labels["jobs"].values() for step in job["steps"])
+
+
+def test_docs_credentials_require_main_and_explicit_deployment_opt_in():
+    docs = workflow("docs.yml")
+    assert docs["permissions"] == {"contents": "read"}
+    assert "environment" not in docs["jobs"]["build"]
+    deploy = docs["jobs"]["deploy"]
+    assert deploy["needs"] == "build"
+    assert deploy["environment"]["name"] == "docs"
+    assert deploy["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DOCS_DEPLOY_ENABLED == 'true'"
+    )
+    assert not any("checkout" in step.get("uses", "") for step in deploy["steps"])
+
+
+def test_docs_project_creation_is_manual_main_only_and_does_not_deploy():
+    creation = workflow("create-docs-project.yml")
+    assert creation[True] == {"workflow_dispatch": None}
+    assert creation["permissions"] == {"contents": "read"}
+    job = creation["jobs"]["create"]
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert job["environment"] == "docs"
+    assert job["steps"][0]["with"]["persist-credentials"] is False
+    step = job["steps"][-1]
+    assert step["run"] == "python scripts/create_docs_project.py"
+    assert step["env"] == {
+        "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+        "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+    }

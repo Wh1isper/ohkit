@@ -8,11 +8,11 @@ A shared API does not imply identical backend capabilities. Ordinary execution, 
 
 ## Backend Boundaries
 
-| Backend | Control boundary               | Workspace boundary                             | Important limitation                                           |
-| ------- | ------------------------------ | ---------------------------------------------- | -------------------------------------------------------------- |
-| Codex   | App-server requests and events | ohkit implements the external exec-server side | Versioned executor requirements exceed file read/write alone   |
-| ACP     | Stable ACP client connection   | Client filesystem and terminal callbacks       | Agent use of callbacks is not universal I/O interception       |
-| Claude  | Claude Agent SDK               | No Workspace bridge in this design             | Native hooks do not establish transparent executor replacement |
+| Backend | Control boundary               | Workspace boundary                          | Important limitation                                           |
+| ------- | ------------------------------ | ------------------------------------------- | -------------------------------------------------------------- |
+| Codex   | App-server requests and events | Application-hosted ohkit exec-server bridge | Versioned executor requirements exceed file read/write alone   |
+| ACP     | Stable ACP client connection   | Client filesystem and terminal callbacks    | Agent use of callbacks is not universal I/O interception       |
+| Claude  | Claude Agent SDK               | No Workspace bridge in this design          | Native hooks do not establish transparent executor replacement |
 
 The Workspace interface does not import any of these protocols. Native libraries are backend-specific dependencies, isolated from the shared values and extension seams. The pure Python package may communicate with an external executable without bundling that executable or requiring a Rust build.
 

@@ -26,12 +26,14 @@ Use feature branches and pull requests for changes to `main`. Main permits squas
 | `make check-all` / `make verify` | All Python gates                                               |
 | `make workflow-check`            | GitHub Actions syntax and expressions                          |
 | `make automation-test`           | PR overview tests                                              |
+| `make docs-build`                | Static documentation, navigation, and internal links           |
+| `make docs-serve`                | Local documentation preview                                    |
 
 Choose local checks from actual changed behavior. Run downstream checks when a shared change affects them. Reuse passing checks while relevant inputs are unchanged. CI runs the complete applicable gates. Do not claim unexecuted checks passed or bypass hooks. `make format` operates on tracked files, so newly created files must be staged before the all-files hook pass.
 
 ## Documentation Changes
 
-`spec/` records accepted technical contracts, not proposals or progress. `docs/` contains user documentation and runbooks. Keep each fact under one owner and link to it. Use relative Markdown links within this repository. Update indexes and incoming links when moving documents. Format Markdown with `uv run --locked mdformat --number`.
+`spec/` records accepted technical contracts, not proposals or progress. `docs/` contains user documentation, explicitly labeled design examples, and runbooks. Keep each fact under one owner and link to it. Start site pages with `title` and `description` front matter; do not repeat the title as a top-level heading. Keep paragraphs on one source line. Use relative Markdown file links between documentation pages and repository URLs for guides outside `docs/`. Update `nav` in the root `mkdocs.yml` when adding, moving, or removing a page. Format Markdown with `uv run --locked mdformat --number` and run `make docs-build`. See [documentation maintenance](docs/documentation.md) for the isolated docs dependencies, preview, and Cloudflare Pages setup. There is no separate frontend application.
 
 ## Writing Issues and Pull Requests
 

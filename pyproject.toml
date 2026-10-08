@@ -17,9 +17,10 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/converge-ai-labs/ohkit"
-Repository = "https://github.com/converge-ai-labs/ohkit"
-Issues = "https://github.com/converge-ai-labs/ohkit/issues"
+Homepage = "https://ohkit.wh1isper.top"
+Documentation = "https://ohkit.wh1isper.top"
+Repository = "https://github.com/Wh1isper/ohkit"
+Issues = "https://github.com/Wh1isper/ohkit/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -32,6 +33,10 @@ packages = ["ohkit"]
 only-include = ["ohkit", "pyproject.toml", "README.md", "LICENSE"]
 
 [dependency-groups]
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.6,<10",
+]
 dev = [
     "deptry>=0.25,<0.26",
     "mdformat==1.0.0",
