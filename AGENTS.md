@@ -1,6 +1,6 @@
 # Repository Guide
 
-ohkit is an independent, pure Python library providing a unified API for coding agents. The bootstrap has no execution API or backend implementations.
+ohkit is an independent, pure Python programming interface for agent harnesses. The specifications define its target architecture; the bootstrap has no execution API or backend implementations.
 
 ## Sources of Truth
 

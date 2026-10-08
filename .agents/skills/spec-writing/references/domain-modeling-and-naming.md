@@ -20,7 +20,7 @@ Use one owning specification, canonical model, and term for each concept; other 
 
 Names state what a concept is without repeating the project or module namespace. Add a qualifier only when it distinguishes real concepts at the same boundary. For implementation naming, follow [DEVELOPMENT.md](../../../../DEVELOPMENT.md#naming).
 
-Domain suffixes such as `Ref`, `Revision`, `Request`, `Selection`, `Lock`, `State`, `Event` and `Receipt` keep the meanings defined by [Platform Data Conventions](../../../../spec/data-conventions.md#public-and-internal-naming). A reference or receipt does not confer authority unless its contract says so.
+Use suffixes such as `Ref`, `Request`, `State`, and `Event` only when they clarify the concept defined by its owner. Follow [Data Conventions](../../../../spec/data-conventions.md); do not import a host platform's revision, lease, or persistence model merely to reuse a naming pattern. A reference or receipt does not confer authority unless its contract says so.
 
 Preserve distinct identity domains in conceptual schemas even when wire encodings are strings:
 
@@ -35,9 +35,9 @@ Do not rename stable wire fields merely to improve internal names. A terminology
 
 ## Version and Revision Semantics
 
-Read [Platform Data Conventions](../../../../spec/data-conventions.md) for Foundation identity, Revision, Snapshot, and version rules, and [Platform API Conventions](../../../../spec/api-conventions.md#mutations-and-retries) for mutation preconditions.
+Read [Data Conventions](../../../../spec/data-conventions.md#compatibility-axes) for independent version owners and [API Conventions](../../../../spec/api-conventions.md#failure-and-compatibility) for failure and compatibility boundaries.
 
-These contracts own the primary `version` axis, the qualification of any independent secondary axis, head/Revision version agreement, and strong ETags for mutable representations. Do not invent another counter or freeze independently mutable metadata to satisfy a naming pattern. Protocols, artifacts, packages, and external systems retain their own version semantics.
+The Python package, native harness protocol, and native history format retain their own version semantics. ohkit does not inherit a Foundation Revision/Snapshot model, head-version rule, or ETag contract. Add such a concept only when a concrete ohkit requirement establishes its owner and observable meaning.
 
 ## Model Review
 

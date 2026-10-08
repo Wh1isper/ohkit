@@ -43,9 +43,9 @@ Use a diagram or table when it clarifies the contract. Prefer Mermaid for archit
 For spec-only changes, format the affected files and run:
 
 ```bash
-uv run --locked mdformat --number <changed-spec-files>
-make verify
-git diff --check -- spec
+uv run --locked mdformat --number <changed-markdown-files>
+uv run --locked python scripts/check_repository.py
+git diff --check
 ```
 
 For accompanying implementation or shared tooling, complete the applicable repository/component gates. Reuse valid results and rerun checks when their inputs change. Report validation and unresolved decisions without claiming that formatting proves semantic correctness.
