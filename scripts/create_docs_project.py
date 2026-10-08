@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 PROJECT = "ohkit-docs"
 BRANCH = "main"
+PAGE_SIZE = 10
 APIRequest = Callable[[str, str, dict[str, str] | None], dict[str, Any]]
 
 
@@ -30,9 +31,21 @@ def cloudflare_request(method: str, path: str, payload: dict[str, str] | None) -
         with urlopen(request, timeout=30) as response:
             body = json.load(response)
     except HTTPError as error:
-        # Never print request headers, account IDs, or arbitrary remote response bodies.
+        # Only numeric API codes are safe diagnostics; never echo remote messages or headers.
+        codes: list[int] = []
+        try:
+            detail = json.load(error)
+        except (ValueError, OSError):
+            detail = None
+        if isinstance(detail, dict) and isinstance(detail.get("errors"), list):
+            codes = [
+                item["code"]
+                for item in detail["errors"]
+                if isinstance(item, dict) and isinstance(item.get("code"), int)
+            ]
         raise RuntimeError(
-            f"Cloudflare {method} failed with HTTP {error.code}; inspect project state before retrying"
+            f"Cloudflare {method} failed with HTTP {error.code}, API codes {codes}; "
+            "inspect project state before retrying"
         ) from None
     except (URLError, TimeoutError):
         raise RuntimeError(
@@ -46,14 +59,15 @@ def cloudflare_request(method: str, path: str, payload: dict[str, str] | None) -
 def find_project(request: APIRequest) -> dict[str, Any] | None:
     page = 1
     while True:
-        response = request("GET", f"?page={page}&per_page=100", None)
+        print(f"Listing Pages projects: page {page}", flush=True)
+        response = request("GET", f"?page={page}&per_page={PAGE_SIZE}", None)
         projects = response["result"]
         if not isinstance(projects, list):
             raise ValueError("Cloudflare returned an invalid project list")
         for project in projects:
             if isinstance(project, dict) and project.get("name") == PROJECT:
                 return project
-        if not projects:
+        if len(projects) < PAGE_SIZE:
             return None
         page += 1
 
@@ -62,7 +76,9 @@ def ensure_project(request: APIRequest = cloudflare_request) -> dict[str, Any]:
     existing = find_project(request)
     if existing is None:
         # No source configuration means Direct Upload. Never retry this mutation automatically.
+        print("Creating ohkit-docs project without a deployment", flush=True)
         request("POST", "", {"name": PROJECT, "production_branch": BRANCH})
+    print("Reading back ohkit-docs project", flush=True)
     project = request("GET", f"/{PROJECT}", None)["result"]
     if not isinstance(project, dict):
         raise ValueError("Cloudflare returned invalid project details")
