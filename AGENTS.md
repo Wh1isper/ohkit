@@ -7,7 +7,7 @@ ohkit is an independent, pure Python programming interface for agent harnesses. 
 - [CONTRIBUTING.md](CONTRIBUTING.md) owns setup, contribution workflow, validation, and releases.
 - [DEVELOPMENT.md](DEVELOPMENT.md) owns code quality and naming.
 - [spec/README.md](spec/README.md) indexes accepted contracts; [Repository Model](spec/repository-model.md) owns repository boundaries.
-- [docs/index.md](docs/index.md) indexes user and operator documentation. `mkdocs.yml` owns site navigation; [documentation maintenance](docs/documentation.md) owns build and deployment.
+- [docs/index.md](docs/index.md) indexes user and operator documentation. `docs/**/meta.json` owns site navigation; `website/` builds the static Fumadocs site; [documentation maintenance](docs/documentation.md) owns build and deployment.
 - [MAINTAINERS.md](MAINTAINERS.md) owns reviewer routing.
 
 Read relevant contracts, implementation, and tests before changing a surface. Write canonical content in English. Skills summarize workflows; they do not grant authority or replace the owning documents.
