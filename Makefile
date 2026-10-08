@@ -1,5 +1,7 @@
 .DEFAULT_GOAL := help
-.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test
+.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve
+
+DOCS_ADDR ?= 127.0.0.1:8000
 
 help: ## List development commands
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "%-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,3 +46,9 @@ check: lint typecheck deps-check ## Run Python and repository static checks
 check-all: check test dist-check ## Run all Python gates, including packaging
 
 verify: check-all ## Validate this single-package repository
+
+docs-build: ## Build static documentation and validate navigation and links
+	uv run --locked --only-group docs mkdocs build --strict
+
+docs-serve: ## Preview documentation locally
+	uv run --locked --only-group docs mkdocs serve --dev-addr $(DOCS_ADDR)

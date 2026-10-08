@@ -13,7 +13,7 @@ The [architecture specifications](spec/README.md) describe the target execution 
 ## Development
 
 ```bash
-git clone https://github.com/converge-ai-labs/ohkit.git
+git clone https://github.com/Wh1isper/ohkit.git
 cd ohkit
 make install
 make check-all
@@ -23,7 +23,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and validation rules, [D
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
+- [Documentation index](docs/index.md)
+- [Documentation build and deployment](docs/documentation.md)
+- Canonical site: [ohkit.wh1isper.top](https://ohkit.wh1isper.top/)
 - [Release procedure](docs/releasing.md)
 - [Security policy](SECURITY.md)
 

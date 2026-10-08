@@ -22,14 +22,14 @@ flowchart TB
     Impl --> Providers[Local, container, or remote providers]
 ```
 
-The control path starts at the application. Work I/O returns through the native bridge to the supplied Workspace. The Codex exec-server protocol is an adapter detail, not the public Workspace interface; ACP uses the same operations through a different protocol.
+The control path starts at the application. Work I/O returns through the native bridge to the supplied Workspace. The control client and Workspace host may be separate processes or services. The Codex exec-server protocol belongs to its backend-specific bridge, not the public Workspace interface; ACP uses the same operations through a different protocol. For application-hosted Codex endpoints, the control client holds an endpoint configuration rather than the remote Workspace object.
 
 | Owner                    | Responsibility                                                                                  |
 | ------------------------ | ----------------------------------------------------------------------------------------------- |
 | Native harness           | Agent loop, tool semantics, native requests, and Turn scheduling                                |
 | ohkit bridge             | Protocol translation, native request/handle correlation, and owned resource cleanup             |
 | Workspace implementation | Target selection, paths, actual file/process behavior, and enforcement of accepted requirements |
-| Caller                   | Provider lifetime, authority granted to the Workspace, credentials, and durable policy          |
+| Caller                   | Provider lifetime, authority, credentials, durable policy, and application-owned bridge hosting |
 
 ## Operation Shape
 
@@ -62,7 +62,9 @@ A composite namespace does not imply that a command can see every mounted filesy
 
 Workspace is bound to a live native conversation attachment, not just one prompt. The caller keeps it usable for that binding's lifetime. A Run ending does not prove that all native callbacks or process handles have ended.
 
-The caller owns the Workspace and its backing providers. ohkit owns the native bridge and file/process handles that it creates through that bridge. Closing the binding stops new requests, settles in-flight callbacks, and closes those handles before releasing the borrowed Workspace. It does not destroy a caller's container or unrelated processes.
+The caller owns the Workspace and its backing providers. ohkit owns bridge protocol processing and the file/process handles it creates, not a mandatory network listener. Closing the binding stops new requests, settles in-flight callbacks, and closes those handles before releasing the borrowed Workspace. It does not destroy a caller's listener, container, shared Workspace, or unrelated processes.
+
+In an application-hosted service, each executor connection has its own resource scope even when several connections borrow one Workspace. A project URL and a Workspace object are not native session identities. The [Codex hosting contract](../backends/01-codex.md#hosting-and-connection-ownership) owns its connection cleanup and reconnection boundary.
 
 Run cancellation preserves the bridge for native cleanup. Where the protocol has only conversation-scoped resource identity, ohkit must not infer that all handles belong to the cancelled Run. Explicit native release or binding close ends their ownership. [Execution cleanup](../execution/01-thread-run.md#cancellation-and-cleanup) governs unresolved effects and cleanup errors.
 

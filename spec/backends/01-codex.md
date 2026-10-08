@@ -2,7 +2,7 @@
 
 ## Design Position
 
-The Codex backend controls native Codex through app-server. When supplied a Workspace, the backend also implements the external exec-server endpoint consumed by app-server. These are two directions of one integration, not two competing agent loops.
+The Codex integration has two independent parts: a control backend connected to app-server, and an embeddable exec-server bridge connected to a Workspace. The application owns the WebSocket listener, authentication, routing, and deployment of that bridge. Control and execution can share a Python process or run in separate services; the control backend does not need the execution service's Workspace object.
 
 ```mermaid
 sequenceDiagram
@@ -11,9 +11,9 @@ sequenceDiagram
     participant Codex as Codex app-server
     participant Bridge as ohkit exec-server bridge
     participant Workspace as Supplied Workspace
-    App->>Adapter: create Thread with Workspace
-    Adapter->>Bridge: open owned endpoint
-    Adapter->>Codex: register and select external environment
+    App->>Bridge: host connection handler with authorized Workspace
+    App->>Adapter: create Thread with executor endpoint
+    Adapter->>Codex: register endpoint and select external environment
     Codex->>Bridge: initialize and inspect execution context
     Bridge->>Workspace: describe and perform supported discovery I/O
     App->>Adapter: start Run
@@ -26,7 +26,19 @@ sequenceDiagram
     Adapter-->>App: events and settled Run result
 ```
 
-The application implements Workspace, not WebSocket messages, Codex process IDs, or patch parsing. In a13n, that implementation delegates to its Environment providers.
+The application supplies Workspace operations and transport I/O, not executor messages, native process IDs, or patch parsing. The bridge consumes complete protocol text messages and sends responses and asynchronous notifications through application-supplied I/O. It owns protocol ordering and request/resource correlation without requiring a particular Web framework. In a13n, Workspace delegates to Environment providers.
+
+## Hosting and Connection Ownership
+
+The control backend supports owned stdio app-server processes and connections to caller-owned remote app-server services. Closing an owned backend releases its own connections and processes; it does not stop a borrowed remote service or an application-hosted executor listener. Control transport selection is independent of Workspace location. Stdio control does not imply a stdio executor bridge.
+
+An external executor endpoint identifies the address reachable by app-server and the credentials needed to connect. It does not carry a Python Workspace or grant access by itself. The hosting application authenticates and authorizes the requested project before admitting the connection. The listener's bind address and app-server's reachable endpoint may differ through a proxy or tunnel; the application owns that network arrangement. Credentials are not conversation-history references or loggable endpoint metadata.
+
+One application listener can expose many URL paths, each bound to an authorized Workspace. A path selects a binding; it is not a built-in ohkit project registry or filesystem router. Multiple connections to one path have separate protocol state and owned file/process handles. Provider lifetime, whether a Workspace may be shared, and coordination of concurrent writes remain application responsibilities.
+
+Each bridge invocation serves one live executor connection. It handles handshake, replies, asynchronous process output, and native errors. Incoming-message completion, transport failure, or cancellation stops admission and settles in-flight operations and owned handles before the borrowed Workspace is released. Cleanup affects only resources created by that connection, never another connection or the entire project. Unresolved effects and cleanup failures remain explicit. The initial bridge does not retain live handles across disconnection or claim successful native session resumption; unsupported recovery requests are rejected. A new connection creates a fresh resource scope.
+
+A local convenience host may compose the same bridge with a loopback listener. It is optional, not a second executor implementation or a requirement for the control backend.
 
 ## Conversation and Control
 
@@ -38,7 +50,7 @@ Native approval and question requests go through the [interaction contract](../e
 
 ## Workspace Binding
 
-The adapter registers its endpoint with `environment/add` and selects that environment for the native conversation. Registration acceptance is not execution readiness. Connection preparation and usable tool availability must be established from native state; no fixed sleep is a compatibility strategy.
+The control adapter registers the supplied executor endpoint with `environment/add` and selects that environment for the native conversation. Registration acceptance is not execution readiness. Connection preparation and usable tool availability must be established from native state; no fixed sleep is a compatibility strategy.
 
 Native app-server path strings and executor file URIs are different representations. The adapter preserves the selected Workspace's namespace and converts representation only. Native response fields describing the app-server host must not overwrite the supplied target cwd or be treated as executor metadata.
 
@@ -52,7 +64,7 @@ The initial integration targets the file/process executor path. Optional capabil
 
 Required startup I/O is part of compatibility, not just model-visible tool calls. File metadata, instruction discovery, missing-file errors, canonicalization, and stream semantics cannot be substituted with plausible dummy results in a production adapter.
 
-Sandbox requirements must be enforced or rejected. Selecting an explicit unsandboxed mode does not prove sandbox support. The bridge is an authority-bearing endpoint and must be reachable only by its intended native peer through the configured protected transport. It is not an unauthenticated public execution service.
+Sandbox requirements must be enforced or rejected. Selecting an explicit unsandboxed mode does not prove sandbox support. The bridge is an authority-bearing endpoint. Its application host admits only authorized native peers through a protected transport. A project URL or default cwd is not filesystem or process isolation; the Workspace provider enforces the actual authority. The bridge is not an unauthenticated public execution service.
 
 Workspace does not relocate all Codex state. Native history, credentials, app-server configuration, and unbridged native paths remain under their own owners. The [common binding lifetime](../workspace/00-overview.md#binding-and-lifetime) governs borrowed providers and owned handles.
 

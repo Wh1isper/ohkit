@@ -1,4 +1,7 @@
-# Releasing ohkit
+---
+title: Releasing ohkit
+description: Prepare, validate, and publish an authorized Python release.
+---
 
 ## One-Time Setup
 

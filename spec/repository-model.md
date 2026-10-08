@@ -15,6 +15,12 @@
 
 Issues own unresolved design discussion. Pull requests review resulting changes. `.claude/skills` points to the same skills; `CLAUDE.md` points to `AGENTS.md`. These are aliases, not independent guidance copies.
 
+## Documentation Boundary
+
+`docs/` owns user-facing Markdown, conceptual examples labeled as unimplemented, and operator procedures. The root `mkdocs.yml` owns navigation and the canonical site address, `https://ohkit.wh1isper.top/`. MkDocs Material builds static output into ignored `site/`; no separate frontend application or production documentation server is required. The `docs` dependency group and `uv.lock` own the build toolchain, independently of the Python package's runtime and artifact build.
+
+The documentation workflow builds and validates pull-request content without deployment credentials. Deployment requires an explicit repository publication opt-in, uses the `docs` GitHub Environment restricted to `main`, and uploads the successful build artifact to Cloudflare Pages. A separate manual main-only workflow can create or verify the Pages project without uploading a deployment. Python publication remains a separate workflow and Environment. [Documentation maintenance](../docs/documentation.md) owns operational configuration and required secrets.
+
 ## Package Boundary
 
 Repository, distribution, and import names are `ohkit`. Python 3.13 is the minimum version. The bootstrap has no runtime dependencies. Wheels and source distributions contain package code, metadata, README, and license, not repository automation, Skills, or credentials. The source distribution can rebuild the wheel without Node.js or Rust. Installed package metadata owns `ohkit.__version__`.
