@@ -29,4 +29,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and validation rules, [D
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[MIT License](LICENSE).
