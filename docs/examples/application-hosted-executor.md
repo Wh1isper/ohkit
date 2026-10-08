@@ -36,8 +36,7 @@ async def serve_codex_executor(
     *,
     messages: AsyncIterable[str],
     send: Callable[[str], Awaitable[None]],
-) -> None:
-    ...
+) -> None: ...
 ```
 
 Each invocation owns its protocol state and the file/process handles it creates. The bridge coordinates replies and asynchronous output; a request-to-response function alone is insufficient.
