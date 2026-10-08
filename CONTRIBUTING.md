@@ -6,7 +6,7 @@ Canonical code, comments, documentation, Issues, pull requests, and commits are 
 
 ## Setup
 
-Install Git, Python 3.13, and uv. Clone the repository and run `make install` to synchronize `uv.lock` and install pre-commit hooks. Node.js is needed only for repository automation tests; Docker is needed for the pinned actionlint command. Neither is a package build or runtime dependency.
+Install Git, Python 3.13, and uv. Clone the repository and run `make install` to synchronize `uv.lock` and install pre-commit hooks. Node.js 24 and pnpm 10.30.3 are needed for the documentation website; Node.js also runs repository automation tests. Docker is needed for the pinned actionlint command. None is a Python package build or runtime dependency.
 
 ## Workflow
 
@@ -33,7 +33,7 @@ Choose local checks from actual changed behavior. Run downstream checks when a s
 
 ## Documentation Changes
 
-`spec/` records accepted technical contracts, not proposals or progress. `docs/` contains user documentation, explicitly labeled design examples, and runbooks. Keep each fact under one owner and link to it. Start site pages with `title` and `description` front matter; do not repeat the title as a top-level heading. Keep paragraphs on one source line. Use relative Markdown file links between documentation pages and repository URLs for guides outside `docs/`. Update `nav` in the root `mkdocs.yml` when adding, moving, or removing a page. Format Markdown with `uv run --locked mdformat --number` and run `make docs-build`. See [documentation maintenance](docs/documentation.md) for the isolated docs dependencies, preview, and Cloudflare Pages setup. There is no separate frontend application.
+`spec/` records accepted technical contracts, not proposals or progress. `docs/` contains user documentation, explicitly labeled design examples, and runbooks. Keep each fact under one owner and link to it. Start site pages with `title` and `description` front matter; do not repeat the title as a top-level heading. Keep paragraphs on one source line. Use relative Markdown file links between documentation pages and repository URLs for guides outside `docs/`. Update the relevant `docs/**/meta.json` navigation when adding, moving, or removing a page. Format Markdown with `uv run --locked mdformat --number` and run `make docs-build`. See [documentation maintenance](docs/documentation.md) for the isolated `website/` build, preview, Mermaid conventions, and Cloudflare Pages setup. Fumadocs and Next.js produce a static export; no production Node.js service is required.
 
 ## Writing Issues and Pull Requests
 

@@ -5,34 +5,40 @@ description: Write, preview, validate, and deploy the ohkit documentation site.
 
 ## Repository layout
 
-`docs/` owns Markdown content and examples. The root `mkdocs.yml` owns navigation, theme, and the canonical site address. MkDocs Material renders a static site into ignored `site/`. There is no separate frontend application or production Python server.
+`docs/` owns Markdown content, examples, and `meta.json` navigation. The independent `website/` application uses Fumadocs and Next.js to export a static site into ignored `website/out/`. It needs no production Node.js service and has no dependency on a13n packages.
 
-The canonical address is `https://ohkit.wh1isper.top/`. The documentation toolchain is in the `docs` dependency group of `pyproject.toml` and is pinned by `uv.lock`. It is not a Python package runtime or build dependency.
+The canonical address is `https://ohkit.wh1isper.top/`, configured in `website/lib/site.tsx`. The documentation toolchain is pinned by `website/package.json` and `website/pnpm-lock.yaml`. Node.js is a documentation build tool, not a Python package runtime or artifact build dependency.
 
 ## Write a page
 
 1. Add a Markdown file under `docs/`.
 2. Include `title` and `description` front matter. Do not repeat the title as a top-level heading; the site renders it.
 3. Use relative Markdown file links for other documentation pages. Use repository URLs for specifications and contributor guides outside `docs/`.
-4. Add the page to `nav` in `mkdocs.yml`. Navigation has one owner; do not add a second `meta.json` catalog.
+4. Add the page to the relevant `docs/**/meta.json` file. Navigation has one owner; do not maintain a second catalog in the website.
 5. Use short, precise English prose. Keep each paragraph on one source line. Use fenced code blocks and Mermaid diagrams when they clarify a flow.
 6. Clearly distinguish shipped behavior from conceptual examples. Do not document proposed imports as available APIs.
 7. Format Markdown and build the site before submitting the change.
 
-These writing and validation conventions follow a13n's documentation standards without importing its frontend application stack.
+Keep `.md` pages readable on GitHub as well as on the site. The site resolves relative Markdown links to public routes. React components belong in `website/`, not ordinary prose pages.
+
+## Diagrams
+
+Use fenced `mermaid` blocks. They render as SVG in the browser with a shared light/dark palette, rounded nodes, and restrained connectors. Add `accTitle` and `accDescr` to explain a diagram to assistive technology. Prefer concise node labels and top-down flows for wide branching diagrams; do not hardcode theme colors or add executable callbacks.
+
+Diagrams sit in a keyboard-scrollable panel with an **Expand** dialog and a **View Mermaid source** fallback. Check both themes and a narrow viewport after changing a diagram. The static build validates page links, but does not execute browser-side Mermaid; visual inspection is still required.
 
 ## Preview and validate
 
-Install Python 3.13 and uv, then run:
+Install Node.js 24 and pnpm 10.30.3, then run:
 
 ```bash
 make docs-serve
 ```
 
-Open the local address printed by MkDocs, normally `http://127.0.0.1:8000`. To select another local port:
+Open the local address printed by Next.js, normally `http://127.0.0.1:3000`. To select another local port:
 
 ```bash
-make docs-serve DOCS_ADDR=127.0.0.1:8001
+make docs-serve DOCS_PORT=3001
 ```
 
 Build the static site:
@@ -41,7 +47,7 @@ Build the static site:
 make docs-build
 ```
 
-The strict build fails on missing pages, invalid navigation, and broken internal anchors. Search, code highlighting, and diagrams are static-site features; no model credentials or application service are required.
+This installs the frozen lockfile, exports the site, checks internal links and anchors, tests public routes and navigation entries, and runs TypeScript checks. Search uses a build-time index exported at `/api/search`; despite the path name, there is no live API server. Code highlighting is built into the HTML; diagrams render in the browser. No model credentials or application service are required.
 
 ## GitHub Environment
 
@@ -52,7 +58,7 @@ Use the `docs` Environment in `Wh1isper/ohkit`, restricted to the `main` branch.
 | `CLOUDFLARE_API_TOKEN`  | API token with **Account → Cloudflare Pages → Edit**, restricted to the target account |
 | `CLOUDFLARE_ACCOUNT_ID` | ID of the Cloudflare account that owns the Pages project                               |
 
-No runtime environment variables are required for the static site. The public domain is in `mkdocs.yml`; the Pages project name is `ohkit-docs`. Do not put either secret in Markdown, repository files, or chat.
+No runtime environment variables are required for the static site. The public domain is in `website/lib/site.tsx`; the Pages project name is `ohkit-docs`. Do not put either secret in Markdown, repository files, or chat.
 
 The repository Actions variable `DOCS_DEPLOY_ENABLED` controls publication. Leave it unset or `false` while provisioning; set it to exactly `true` only when documentation publication is authorized. Project creation does not change this switch.
 
@@ -74,7 +80,7 @@ Do not execute project creation or deployment without the corresponding authoriz
 
 ## Deployment workflow
 
-The `Docs` GitHub Actions workflow builds documentation on relevant pull requests and `main` pushes. It stores `site/` as an artifact. Only a successful `main` push build with `DOCS_DEPLOY_ENABLED=true` can deploy, and only its deployment job receives the `docs` Environment secrets. A manual workflow dispatch builds an artifact without deploying.
+The `Docs` GitHub Actions workflow builds documentation on relevant pull requests and `main` pushes. It stores `website/out/` as an artifact. Only a successful `main` push build with `DOCS_DEPLOY_ENABLED=true` can deploy, and only its deployment job receives the `docs` Environment secrets. A manual workflow dispatch builds an artifact without deploying.
 
 The Python release workflow remains separate and uses the `ohkit-pypi` Environment. Documentation publication never publishes a Python release.
 

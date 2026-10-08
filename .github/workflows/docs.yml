@@ -5,18 +5,14 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "docs/**"
-      - "mkdocs.yml"
-      - "pyproject.toml"
-      - "uv.lock"
+      - "website/**"
       - "Makefile"
       - ".github/workflows/docs.yml"
   push:
     branches: [main]
     paths:
       - "docs/**"
-      - "mkdocs.yml"
-      - "pyproject.toml"
-      - "uv.lock"
+      - "website/**"
       - "Makefile"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
@@ -43,15 +39,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
-          python-version: "3.13"
+          package_json_file: website/package.json
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          enable-cache: true
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
 
       - name: Build and validate docs
         run: make docs-build
@@ -60,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docs-site
-          path: site
+          path: website/out
           if-no-files-found: error
 
   deploy:

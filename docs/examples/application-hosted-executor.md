@@ -11,13 +11,15 @@ An application hosts a WebSocket server. Each project route selects an authorize
 
 ```mermaid
 flowchart TD
+    accTitle: Application-hosted executor routing
+    accDescr: Codex app-server connects through application routing and authentication to independent bridge connections for projects A and B. Each connection uses its project's Workspace for files and processes.
     Codex[Codex app-server] --> Routes[Application routing and authentication]
     Routes -->|/projects/a/exec| A[Bridge connection A]
     Routes -->|/projects/b/exec| B[Bridge connection B]
     A --> WA[Workspace A]
     B --> WB[Workspace B]
-    WA --> PA[Project A files and processes]
-    WB --> PB[Project B files and processes]
+    WA --> PA[Project A<br/>files and processes]
+    WB --> PB[Project B<br/>files and processes]
 ```
 
 A project endpoint is a logical route, not a dedicated server process. The control client and executor service can be deployed separately.

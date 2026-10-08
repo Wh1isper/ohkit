@@ -9,11 +9,6 @@ repos:
       - id: check-json
       - id: check-toml
       - id: check-yaml
-        exclude: ^mkdocs\.yml$
-      - id: check-yaml
-        name: check MkDocs YAML syntax
-        files: ^mkdocs\.yml$
-        args: [--unsafe]
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
