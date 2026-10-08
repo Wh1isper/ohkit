@@ -24,7 +24,10 @@ def check_wheel(path: Path, version: str) -> None:
         assert metadata["Name"] == "ohkit"
         assert metadata["Version"] == version
         assert metadata["Requires-Python"] == ">=3.13"
-        assert metadata["License-Expression"] == "Apache-2.0"
+        assert metadata["License-Expression"] == "MIT"
+        license_text = archive.read(prefix + "licenses/LICENSE").decode()
+        assert license_text.startswith("MIT License\n")
+        assert "Copyright (c) 2026 Converge AI" in license_text
         assert not metadata.get_all("Requires-Dist")
         assert "Root-Is-Purelib: true" in archive.read(prefix + "WHEEL").decode()
 

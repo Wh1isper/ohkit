@@ -5,7 +5,7 @@ description: Prepare focused commits, push branches, and create or update GitHub
 
 # Commit, Push, and Pull Request
 
-Complete the requested Git/GitHub handoff under `AGENTS.md` and `CONTRIBUTING.md`. Preserve existing authorization across follow-ups. Do not add Issue creation, reviewer requests, PR merges, releases, or deployments unless authorized. Do not start a separate code review or review subagent unless the user requests it.
+Complete the requested Git/GitHub handoff under `AGENTS.md` and `CONTRIBUTING.md`. Preserve existing authorization across follow-ups. Do not add Issue creation, reviewer requests, PR merges, releases, or deployments unless authorized. Use independent review according to the risk-based rules in `AGENTS.md`; a commit or PR alone does not require a separate review.
 
 ## Inspect and Prepare
 
