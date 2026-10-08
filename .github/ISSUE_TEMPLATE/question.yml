@@ -1,0 +1,30 @@
+name: Question
+description: Ask about using, extending, or contributing to ohkit
+title: "[Question]: "
+labels: [question]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - ohkit library
+        - CI, release, or repository tooling
+        - documentation or specification
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Explain what you are trying to accomplish and where you are blocked.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include relevant versions, configuration, code, and approaches already tried. Do not include secrets or sensitive data.
