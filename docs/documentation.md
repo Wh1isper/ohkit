@@ -60,8 +60,9 @@ The repository Actions variable `DOCS_DEPLOY_ENABLED` controls publication. Leav
 
 1. Add the Environment secrets listed above.
 2. Run the **Create docs project** GitHub Actions workflow on `main`. It creates a Cloudflare Pages **Direct Upload** project named `ohkit-docs`, with production branch `main`, or verifies a matching existing project without changing it. It does not upload a deployment or modify DNS. Direct Upload keeps GitHub Actions as the only build and upload owner.
-3. After the first authorized deployment, add `ohkit.wh1isper.top` under the Pages project's **Custom domains** and follow Cloudflare's domain verification and DNS instructions. Register the custom domain with Pages; a DNS record alone is not the complete binding.
-4. Confirm HTTPS and the custom domain show as active, then verify the homepage, search, and example page.
+3. After the first authorized deployment, run **Configure docs domain** on `main` to register `ohkit.wh1isper.top` with Pages and create its CNAME to `ohkit-docs.pages.dev` if absent. For automatic DNS setup, the token additionally needs **Zone → Zone → Read** and **Zone → DNS → Edit**, restricted to `wh1isper.top`. Existing conflicting DNS records are not overwritten. The workflow is manual, uses the `docs` Environment, and does not deploy site content.
+4. If DNS permissions are unavailable, registration can succeed while the workflow reports a DNS failure. Add the CNAME in the DNS provider instead, or update the Environment token and rerun. A DNS record alone is not the complete Pages binding. You can also register the domain manually under the Pages project's **Custom domains**.
+5. Confirm HTTPS and the custom domain show as active, then verify the homepage, search, and example page. A successful configuration request can still report pending certificate or domain activation.
 
 An authenticated maintainer can also create the project with Wrangler:
 
