@@ -64,3 +64,14 @@ def test_docs_project_creation_is_manual_main_only_and_does_not_deploy():
         "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
         "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
     }
+
+
+def test_docs_domain_configuration_is_manual_and_main_only():
+    configuration = workflow("configure-docs-domain.yml")
+    assert configuration[True] == {"workflow_dispatch": None}
+    assert configuration["permissions"] == {"contents": "read"}
+    job = configuration["jobs"]["configure"]
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert job["environment"] == "docs"
+    assert job["steps"][0]["with"]["persist-credentials"] is False
+    assert job["steps"][-1]["run"] == "python scripts/configure_docs_domain.py"

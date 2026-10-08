@@ -13,16 +13,22 @@ from urllib.request import Request, urlopen
 PROJECT = "ohkit-docs"
 BRANCH = "main"
 PAGE_SIZE = 10
-APIRequest = Callable[[str, str, dict[str, str] | None], dict[str, Any]]
+APIRequest = Callable[[str, str, dict[str, Any] | None], dict[str, Any]]
 
 
-def cloudflare_request(method: str, path: str, payload: dict[str, str] | None) -> dict[str, Any]:
+def cloudflare_request(method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
     account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", account):
+        raise ValueError("Configure CLOUDFLARE_ACCOUNT_ID in the docs Environment")
+    return api_request(method, f"/accounts/{account}/pages/projects{path}", payload)
+
+
+def api_request(method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-    if not re.fullmatch(r"[0-9a-fA-F]{32}", account) or not token:
-        raise ValueError("Configure CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the docs Environment")
+    if not token:
+        raise ValueError("Configure CLOUDFLARE_API_TOKEN in the docs Environment")
     request = Request(
-        f"https://api.cloudflare.com/client/v4/accounts/{account}/pages/projects{path}",
+        f"https://api.cloudflare.com/client/v4{path}",
         data=json.dumps(payload).encode() if payload is not None else None,
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         method=method,
