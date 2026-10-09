@@ -18,7 +18,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,11 +30,11 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - name: Compare latest stable release with the tested baseline
+      - name: Test unchanged adapter against baseline and latest stable
         env:
           GH_TOKEN: ${{ github.token }}
         run: make codex-upstream-check
-      - name: Retain drift or diagnostic report
+      - name: Retain native results and informational schema diff
         if: always()
         uses: actions/upload-artifact@v4
         with:

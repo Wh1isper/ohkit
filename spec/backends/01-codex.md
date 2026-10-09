@@ -72,11 +72,11 @@ Workspace does not relocate all Codex state. Native history, credentials, app-se
 
 The implemented control adapter derives private typed wire models from a pinned official app-server schema export. Upstream owns fields and aliases; the adapter owns method/response association and semantic projection into shared values. Generated native types are not public ohkit API. Required fields, nullable values, and omission remain distinct. Known field types are validated without coercion; additive native fields are preserved. Invalid known shapes fail explicitly, and possible dispatch without usable acknowledgement retains unknown-outcome semantics.
 
-A schema-compatible message is not proof of execution completion, steering consumption, or an authorized decision. Those guarantees remain governed by execution and interaction contracts. Reproducible generation, controlled protocol tests, and exact-version native tests provide separate evidence. Automated upstream version/schema comparison reports drift for review; it does not expand the tested range or upgrade the baseline automatically. [Protocol maintenance](../../docs/codex-protocol.md) owns the contributor procedure.
+A schema-compatible message is not proof of execution completion, steering consumption, or an authorized decision. Those guarantees remain governed by execution and interaction contracts. Reproducible generation, controlled protocol tests, and exact-version native tests provide separate evidence. Automated upstream checks run the unchanged adapter against both the pinned native baseline and the candidate release. Version/schema drift alone is informational, not a compatibility failure. A passing control plus failing candidate cases identifies a covered-path regression; an unhealthy control or incomplete check is inconclusive. Passing these scenarios does not prove compatibility for every native variant, expand the supported range, or upgrade the baseline automatically. [Protocol maintenance](../../docs/codex-protocol.md) owns the contributor procedure.
 
 ## Upstream Basis
 
-The mapping is grounded in Codex `rust-v0.161.0` and remains version-sensitive:
+The unimplemented Workspace/executor mapping is grounded in Codex `rust-v0.161.0` and remains version-sensitive. The implemented control adapter's current baseline is owned by [Codex compatibility](../../docs/codex.md#compatibility-and-validation):
 
 - [App-server environment selection](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/app-server-protocol/src/protocol/v2/environment.rs).
 - [Executor protocol](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/exec-server-protocol/src/protocol.rs), including `process/start`, output/exit/close, file operations, metadata, and capability advertisement.

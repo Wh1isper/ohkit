@@ -1,6 +1,6 @@
 ---
 title: Codex protocol maintenance
-description: Reproduce private wire models, detect upstream drift, and review a native compatibility upgrade.
+description: Reproduce private wire models, test native upstream regressions, and review compatibility upgrades.
 ---
 
 ## One source, three boundaries
@@ -20,24 +20,32 @@ make codex-generate       # Offline regeneration from the checked-in snapshot
 make codex-check          # Offline snapshot integrity and byte-for-byte generation check
 make check-all            # Includes codex-check, strict typing, tests, and artifact checks
 make codex-native-test    # Exact pinned executable + deterministic localhost model
-make codex-upstream-check # Network: compare the latest stable native release
+make codex-upstream-check # Linux x86_64: test baseline and latest stable native release
 ```
 
 The native fixture uses the same checksum-verifying download helper as maintenance. On another supported platform, set `OHKIT_CODEX_BINARY=/absolute/path/to/codex` to an exact-version executable. It still checks the native version. Tests isolate native home/configuration and use a loopback model, not model-provider credentials. CI runs native tests in a separate job so network/executable failures are distinct from offline package checks.
 
-## Daily upstream signal
+## Daily native regression check
 
-The **Codex upstream** GitHub Action runs daily at **07:23 UTC** and supports manual dispatch. It has read-only repository permissions. It queries OpenAI's latest stable GitHub release, verifies the official asset checksum, exports the same selected schema, and compares both version and definitions against the tested baseline. It does not modify the baseline, create Issues/PRs, or upgrade dependencies.
+The **Codex upstream** GitHub Action runs daily at **07:23 UTC** and supports manual dispatch with read-only repository permissions. It resolves OpenAI's latest stable GitHub release once, verifies official archive checksums, and runs the **same unchanged adapter, generated models, and native test suite** against the pinned baseline and the candidate executable. When both versions and archive digests match, one run supplies both results. The check never regenerates models or updates the manifest: testing after regeneration would answer a different question.
 
-The report is written to the Actions step summary and retained in the `codex-upstream` artifact for 30 days. Locally it appears under `test-results/codex-upstream/`: `report.md`, machine-readable `result.json`, and, when comparison completes, `schema.json` and `schema.diff`.
+The baseline is a control for fixture or environment failures. Both runs must report the same nonempty test-case set without skipped tests or setup/teardown errors. The fixture checks each executable's exact expected version. Each suite has a five-minute deadline; expiry terminates its pytest/native process group and is inconclusive, not automatically an upstream regression. `OHKIT_CODEX_TEST_VERSION` is a maintenance-only fixture override requiring an explicit `OHKIT_CODEX_BINARY`; it does not relax adapter validation or change `Codex.tested_native_version`.
 
-| Script exit | Status         | Meaning and response                                                                                                                                                  |
-| ----------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0           | `current`      | Version and selected schema match. This is not a live-provider test.                                                                                                  |
-| 1           | `drift`        | Version changed, selected definitions differ, or a selected native method/type disappeared. Review before upgrading; a version-only change can still affect behavior. |
-| 2           | `inconclusive` | Network, download, checksum, or export failed. Fix or rerun the check; do not treat it as compatibility evidence.                                                     |
+| Script exit | Status         | Meaning and response                                                                                                                                                                                      |
+| ----------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0           | `passed`       | Baseline and candidate pass the covered native scenarios. Version/schema changes alone stay green.                                                                                                        |
+| 1           | `regression`   | Baseline passes, candidate has test failures, and case coverage matches. Inspect the failing cases and logs before attributing the cause to Codex or the adapter.                                         |
+| 2           | `inconclusive` | No healthy control, download/checksum failure, skipped/errored or mismatched cases, timeout, missing report, or pytest execution failure. Repair/rerun the check; this is not an incompatibility verdict. |
 
-Both nonzero statuses fail the Action so drift cannot become a silent green check. `make` itself may return its generic failure exit code; use the script directly when automating the 0/1/2 distinction. Schedule activation requires this workflow on the default branch. GitHub may delay scheduled jobs or disable them for inactivity; use manual dispatch when needed and configure your GitHub Actions failure notifications. This is a maintenance signal, not a guaranteed-time alert service.
+The workflow fails for a regression or an inconclusive **check**, not for a new version or schema drift. `make` may return its generic failure exit code; use the script directly for the 0/1/2 distinction. The Actions step summary and 30-day `codex-upstream` artifact retain `report.md`, machine-readable `result.json`, baseline/candidate `pytest.log` and `junit.xml`, and optional `schema.json`/`schema.diff`. Locally these live under `test-results/codex-upstream/`. Reused native results are identified in the summary and only have baseline logs. Schema comparison failure is visible as `schema: unavailable` but does not override completed native evidence.
+
+### What this evidence does and does not establish
+
+The native suite exercises initialization, thread start/resume/fork, streaming and usage, active steering consumed by a subsequent model request, interrupt and terminal settlement, real command accept/cancel effects, typed questions, and stdio/WebSocket ownership. It uses a deterministic localhost model, not authenticated live-provider behavior. It is a regression gate for these paths, **not a proof that every upstream message or configuration is compatible**. Native file/permission approval variants and other unexercised features still require targeted tests and source review when changed.
+
+The official [app-server documentation](https://developers.openai.com/codex/app-server) describes generated schemas as specific to the executable version and gates experimental fields through `experimentalApi`; it does not make our strict consumer automatically forward-compatible. Optional fields, enum/union additions, removed fields, and changed runtime ordering have different effects. In particular, an added enum value may fail an existing strict decoder even while ordinary native tests pass. Schema diff therefore remains informational review evidence, never an automatic compatibility verdict. Do not build a second general-purpose schema compatibility engine or accept unknown decision/terminal variants merely to obtain a green check.
+
+Schedule activation requires the workflow on the default branch. GitHub may delay scheduled jobs or disable them for inactivity; use manual dispatch when needed and configure Actions failure notifications. This is not a guaranteed-time alert service.
 
 ## Reviewed upgrade
 

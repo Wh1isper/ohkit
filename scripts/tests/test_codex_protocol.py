@@ -18,7 +18,7 @@ def baseline(monkeypatch, tmp_path):
     source = tmp_path / "source"
     source.mkdir()
     monkeypatch.setattr(protocol, "SOURCE", source)
-    write_json(source / "manifest.json", {"version": "1.0.0", "schema_sha256": "unused"})
+    write_json(source / "manifest.json", {"version": "1.0.0", "archive_sha256": "baseline", "schema_sha256": "unused"})
     old = {"definitions": {"Old": {"type": "string"}}}
     write_json(source / "schema.json", old)
     return source, old
@@ -90,28 +90,37 @@ def test_release_rejects_nonstable_tags(monkeypatch):
     assert seen == [protocol.API + "/latest"]
 
 
-@pytest.mark.parametrize("version,changed,status", [("1.0.0", False, 0), ("1.0.1", False, 1), ("1.0.0", True, 1)])
-def test_upstream_reports_version_and_schema_drift(monkeypatch, tmp_path, version, changed, status):
+@pytest.mark.parametrize("version,changed", [("1.0.0", False), ("1.0.1", False), ("1.0.1", True)])
+def test_upstream_drift_alone_is_informational(monkeypatch, tmp_path, version, changed):
     _, old = baseline(monkeypatch, tmp_path)
-    current = {"version": version}
+    current = {"version": version, "archive_sha256": "baseline"}
     monkeypatch.setattr(protocol, "release", lambda: {})
     monkeypatch.setattr(protocol, "asset_metadata", lambda value: current)
     monkeypatch.setattr(protocol, "download_binary", lambda *args: Path("codex"))
+    calls = []
+
+    def native(binary, version, output):
+        calls.append(version)
+        return protocol.NativeResult("passed", ("native::test",))
+
+    monkeypatch.setattr(protocol, "run_native", native)
     new = {"definitions": {"New": {"type": "integer"}}} if changed else old
     monkeypatch.setattr(protocol, "export_schema", lambda *args: new)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     output = tmp_path / "report"
-    assert protocol.check_upstream(output) == status
+    before = {p.name: p.read_bytes() for p in protocol.SOURCE.iterdir()}
+    assert protocol.check_upstream(output) == 0
+    assert calls == (["1.0.0"] if version == "1.0.0" else ["1.0.0", version])
+    assert before == {p.name: p.read_bytes() for p in protocol.SOURCE.iterdir()}
     assert summary.read_text() == (output / "report.md").read_text()
     assert bool((output / "schema.diff").read_text()) == changed
     result = json.loads((output / "result.json").read_text())
-    assert result["status"] == ("drift" if status else "current")
+    assert result["status"] == "passed"
+    assert result["schema"] == ("changed" if changed else "unchanged")
 
 
-@pytest.mark.parametrize(
-    "error,status", [(OSError("network unavailable"), 2), (protocol.SurfaceChanged("missing Params"), 1)]
-)
+@pytest.mark.parametrize("error,status", [(OSError("network unavailable"), 2), (ValueError("checksum mismatch"), 2)])
 def test_failed_check_keeps_diagnostic_not_stale_diff(monkeypatch, tmp_path, error, status):
     baseline(monkeypatch, tmp_path)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
@@ -167,3 +176,136 @@ def test_update_does_not_publish_snapshot_when_generation_fails(monkeypatch, tmp
         protocol.update("2.0.0", Path("codex"))
     assert (source / "manifest.json").read_bytes() == before
     assert json.loads((source / "schema.json").read_text()) == old
+
+
+@pytest.mark.parametrize(
+    "reference,candidate,expected",
+    [
+        ("passed", "passed", 0),
+        ("passed", "failed", 1),
+        ("failed", "failed", 2),
+        ("failed", "passed", 2),
+        ("inconclusive", "failed", 2),
+        ("passed", "inconclusive", 2),
+    ],
+)
+def test_upstream_verdict_requires_healthy_control(monkeypatch, tmp_path, reference, candidate, expected):
+    _, old = baseline(monkeypatch, tmp_path)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(protocol, "release", lambda: {})
+    monkeypatch.setattr(protocol, "asset_metadata", lambda value: {"version": "2.0.0", "archive_sha256": "new"})
+    monkeypatch.setattr(protocol, "download_binary", lambda *args: Path("codex"))
+    monkeypatch.setattr(protocol, "export_schema", lambda *args: old)
+    monkeypatch.setattr(
+        protocol,
+        "run_native",
+        lambda binary, version, output: protocol.NativeResult(
+            reference if version == "1.0.0" else candidate, ("native::test",)
+        ),
+    )
+    output = tmp_path / "report"
+    assert protocol.check_upstream(output) == expected
+    result = json.loads((output / "result.json").read_text())
+    assert result["status"] == ("passed", "regression", "inconclusive")[expected]
+
+
+def test_mismatched_coverage_cannot_pass_or_report_regression():
+    reference = protocol.NativeResult("passed", ("a", "b"))
+    for status in ("passed", "failed"):
+        assert protocol.regression_status(reference, protocol.NativeResult(status, ("a",))) == 2
+
+
+@pytest.mark.parametrize("error", [protocol.SurfaceChanged("missing Params"), OSError("export failed")])
+def test_schema_export_failure_does_not_override_native_evidence(monkeypatch, tmp_path, error):
+    baseline(monkeypatch, tmp_path)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(protocol, "release", lambda: {})
+    monkeypatch.setattr(protocol, "asset_metadata", lambda value: {"version": "2.0.0", "archive_sha256": "new"})
+    monkeypatch.setattr(protocol, "download_binary", lambda *args: Path("codex"))
+    monkeypatch.setattr(protocol, "run_native", lambda *args: protocol.NativeResult("passed", ("a",)))
+
+    def fail(*args):
+        raise error
+
+    monkeypatch.setattr(protocol, "export_schema", fail)
+    output = tmp_path / "report"
+    assert protocol.check_upstream(output) == 0
+    result = json.loads((output / "result.json").read_text())
+    assert result["schema"] == "unavailable"
+    assert str(error) in (output / "report.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "cases,code,status",
+    [
+        ('<testcase classname="native" name="a"/>', 0, "passed"),
+        ('<testcase classname="native" name="a"><failure/></testcase>', 1, "failed"),
+        ('<testcase classname="native" name="a"><error/></testcase>', 1, "inconclusive"),
+        ('<testcase classname="native" name="a"><skipped/></testcase>', 0, "inconclusive"),
+        ('<testcase classname="native" name="a"><failure/><error/></testcase>', 1, "inconclusive"),
+        ('<testcase classname="native" name="a"/>', 2, "inconclusive"),
+        ('<testcase classname="native" name="a"><failure/></testcase>', 0, "inconclusive"),
+        ("", 0, "inconclusive"),
+        ("", 5, "inconclusive"),
+    ],
+)
+def test_native_junit_classification(tmp_path, cases, code, status):
+    path = tmp_path / "junit.xml"
+    path.write_text(f"<testsuites><testsuite>{cases}</testsuite></testsuites>")
+    result = protocol.native_result(path, code)
+    assert result.status == status
+    if status == "failed":
+        assert result.failures == ("native::a",)
+
+
+def test_native_missing_or_malformed_report_is_inconclusive(tmp_path):
+    path = tmp_path / "junit.xml"
+    assert protocol.native_result(path, 0).status == "inconclusive"
+    path.write_text("not XML")
+    assert protocol.native_result(path, 0).status == "inconclusive"
+
+
+def test_native_runner_selects_candidate_without_regeneration(monkeypatch, tmp_path):
+    from unittest.mock import MagicMock
+
+    process = MagicMock()
+    process.__enter__.return_value = process
+    process.wait.return_value = 0
+    seen = []
+
+    def launch(command, **kwargs):
+        seen.append((command, kwargs))
+        report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--junitxml="))
+        Path(report).write_text(
+            '<testsuites><testsuite><testcase classname="native" name="a"/></testsuite></testsuites>'
+        )
+        return process
+
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-k nonexistent")
+    monkeypatch.setattr(protocol.subprocess, "Popen", launch)
+    assert protocol.run_native(Path("codex"), "9.0.0", tmp_path).status == "passed"
+    command, kwargs = seen[0]
+    assert command[1:4] == ["-m", "pytest", "tests/test_codex_native.py"]
+    assert "addopts=--import-mode=importlib" in command
+    assert "--timeout=0" in command
+    assert kwargs["cwd"] == protocol.ROOT
+    assert kwargs["env"]["OHKIT_CODEX_TEST_VERSION"] == "9.0.0"
+    assert kwargs["env"]["OHKIT_TEST_NATIVE"] == "1"
+    assert kwargs["env"]["OHKIT_CODEX_BINARY"] == str(Path("codex").resolve())
+    assert "PYTEST_ADDOPTS" not in kwargs["env"]
+    assert kwargs["start_new_session"] is True
+
+
+def test_native_timeout_kills_native_descendants_and_cannot_pass(monkeypatch, tmp_path):
+    from unittest.mock import MagicMock
+
+    process = MagicMock()
+    process.__enter__.return_value = process
+    process.wait.side_effect = [subprocess.TimeoutExpired("pytest", 300), -9]
+    monkeypatch.setattr(protocol.subprocess, "Popen", lambda *args, **kwargs: process)
+    killed = []
+    monkeypatch.setattr(protocol.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    result = protocol.run_native(Path("codex"), "1.0.0", tmp_path)
+    assert result.status == "inconclusive"
+    assert killed == [(process.pid, protocol.signal.SIGKILL)]
+    assert "300s" in result.detail

@@ -42,7 +42,8 @@ test("implemented control and unimplemented Workspace boundaries remain visible"
   assert.match(read("index.html"), /version metadata only/);
   assert.match(read("getting-started/index.html"), /Earlier published bootstrap releases/);
   assert.match(read("getting-started/index.html"), /from this checkout/);
-  assert.match(read("codex/index.html"), /0\.161\.0/);
+  const baseline = JSON.parse(readFileSync(new URL("../../protocol/codex/manifest.json", import.meta.url), "utf8"));
+  assert.ok(read("codex/index.html").includes(`Codex ${baseline.version}`));
   assert.match(read("codex/index.html"), /does not supply a Workspace or executor bridge/);
   assert.match(read("execution/index.html"), /UnknownOutcomeError|unknown result/);
   const example = read("examples/application-hosted-executor/index.html");

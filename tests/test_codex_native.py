@@ -2,12 +2,15 @@
 
 Opt in with OHKIT_TEST_NATIVE=1. An explicit OHKIT_CODEX_BINARY may replace the
 verified official Linux fixture download; its version is checked before use.
+Maintenance may set OHKIT_CODEX_TEST_VERSION with an explicit candidate binary;
+this changes only the fixture's version assertion, never adapter code/models.
 """
 
 import asyncio
 import json
 import os
 import platform
+import subprocess
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -25,14 +28,18 @@ pytestmark = pytest.mark.skipif(os.environ.get("OHKIT_TEST_NATIVE") != "1", reas
 @pytest.fixture(scope="module")
 def binary(tmp_path_factory):
     supplied = os.environ.get("OHKIT_CODEX_BINARY")
-    if supplied:
-        return supplied
-    if platform.system() != "Linux" or platform.machine() != "x86_64":
-        pytest.skip("Provide OHKIT_CODEX_BINARY for this platform")
-    root = tmp_path_factory.mktemp("codex-native")
-    metadata = json.loads((SOURCE / "manifest.json").read_text())
-    assert metadata["version"] == CODEX_VERSION
-    return str(download_binary(metadata, root))
+    expected = os.environ.get("OHKIT_CODEX_TEST_VERSION", CODEX_VERSION)
+    if not supplied:
+        assert expected == CODEX_VERSION, "Candidate version requires OHKIT_CODEX_BINARY"
+        if platform.system() != "Linux" or platform.machine() != "x86_64":
+            pytest.skip("Provide OHKIT_CODEX_BINARY for this platform")
+        root = tmp_path_factory.mktemp("codex-native")
+        metadata = json.loads((SOURCE / "manifest.json").read_text())
+        assert metadata["version"] == CODEX_VERSION
+        supplied = str(download_binary(metadata, root))
+    actual = subprocess.check_output([supplied, "--version"], text=True, timeout=10).strip()
+    assert actual == f"codex-cli {expected}", f"Expected Codex {expected}, found {actual}"
+    return supplied
 
 
 class Model:
@@ -127,9 +134,6 @@ class Model:
 
 @asynccontextmanager
 async def fixture(binary, root: Path):
-    version = await asyncio.create_subprocess_exec(binary, "--version", stdout=asyncio.subprocess.PIPE)
-    output, _ = await version.communicate()
-    assert output.decode().strip() == f"codex-cli {CODEX_VERSION}"
     model = Model()
     server = await asyncio.start_server(model.connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]

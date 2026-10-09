@@ -149,3 +149,25 @@ def test_native_decoder_does_not_accept_python_names_as_wire_aliases():
     # Internal construction remains Pythonic; raw approvals are retained outside
     # model serialization to avoid Pydantic fields_set/extra-name collisions.
     assert encode(wire.TurnSteerResponse(turn_id="turn")) == {"turnId": "turn"}
+
+
+def test_codex_0162_partial_answer_and_root_turn_fields():
+    raw = {
+        "threadId": "thread",
+        "turnId": "turn",
+        "startedAtMs": 1,
+        "item": {
+            "type": "agentMessage",
+            "id": "message",
+            "text": "partial",
+            "phase": "partial_answer",
+        },
+    }
+    assert encode(decode(wire.ItemStartedNotification, raw)) == raw
+    raw["item"]["phase"] = "future_unknown_phase"
+    with pytest.raises(ProtocolError):
+        decode(wire.ItemStartedNotification, raw)
+    turn = {"id": "turn", "items": [], "status": "inProgress", "error": None, "rootTurnId": "root"}
+    assert encode(decode(wire.Turn, turn)) == turn
+    params = {"threadId": "thread", "input": [], "parentTurnId": "parent", "rootTurnId": "root"}
+    assert encode(decode(wire.TurnStartParams, params)) == params

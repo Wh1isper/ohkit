@@ -82,7 +82,7 @@ def test_codex_maintenance_is_read_only_scheduled_and_preserves_reports():
     assert maintenance[True] == {"schedule": [{"cron": "23 7 * * *"}], "workflow_dispatch": None}
     assert maintenance["permissions"] == {"contents": "read"}
     job = maintenance["jobs"]["check"]
-    assert job["timeout-minutes"] == 15
+    assert job["timeout-minutes"] == 20
     assert "environment" not in job
     assert job["steps"][0]["with"]["persist-credentials"] is False
     check = next(step for step in job["steps"] if step.get("run") == "make codex-upstream-check")

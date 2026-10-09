@@ -1,4 +1,4 @@
-# Generated from OpenAI Codex rust-v0.161.0 (Apache-2.0).
+# Generated from OpenAI Codex rust-v0.162.0 (Apache-2.0).
 # Do not edit; run make codex-generate. See THIRD_PARTY_NOTICES.md.
 
 from __future__ import annotations
@@ -540,6 +540,13 @@ class ReasoningTextDeltaNotification(WireModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class AdditionalToolsResponseItem(WireModel):
+    id: str | None = None
+    role: str
+    tools: list[Any]
+    type: Annotated[Literal["additional_tools"], Field(title="AdditionalToolsResponseItemType")]
+
+
 class AgentMessageResponseItem(WireModel):
     author: str
     content: list[InputTextAgentMessageInputContent | EncryptedContentAgentMessageInputContent]
@@ -837,6 +844,17 @@ class SubAgentActivityThreadItem(WireModel):
     agent_thread_id: Annotated[str, Field(alias="agentThreadId")]
     id: str
     kind: Literal["started", "interacted", "interrupted", "completed"]
+    model: Annotated[
+        str | None,
+        Field(description="Resolved model at sub-agent creation; absent from older records and other activities."),
+    ] = None
+    reasoning_effort: Annotated[
+        ReasoningEffort | None,
+        Field(
+            alias="reasoningEffort",
+            description="Resolved reasoning effort at sub-agent creation, when known.",
+        ),
+    ] = None
     type: Annotated[Literal["subAgentActivity"], Field(title="SubAgentActivityThreadItemType")]
 
 
@@ -1160,6 +1178,13 @@ class MisalignmentErrorDetails(WireModel):
             description="Open-ended classification; clients must accept categories added by Responses.",
         ),
     ] = None
+    review_target: Annotated[
+        str | None,
+        Field(
+            alias="reviewTarget",
+            description="Opaque server-issued block target. Presence alone does not enable target-based continuation.",
+        ),
+    ] = None
     steer: Annotated[
         MisalignmentSteer | None,
         Field(description="Instruction to submit as the next turn's user input if continuation is confirmed."),
@@ -1182,7 +1207,7 @@ class MessageResponseItem(WireModel):
     ]
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
-    phase: Literal["commentary", "final_answer"] | None = None
+    phase: Literal["commentary", "partial_answer", "final_answer"] | None = None
     role: str
     type: Annotated[Literal["message"], Field(title="MessageResponseItemType")]
 
@@ -1323,7 +1348,7 @@ class AgentMessageThreadItem(WireModel):
     delivery: Literal["async"] | None = None
     id: str
     memory_citation: Annotated[MemoryCitation | None, Field(alias="memoryCitation")] = None
-    phase: Literal["commentary", "final_answer"] | None = None
+    phase: Literal["commentary", "partial_answer", "final_answer"] | None = None
     questions: list[AsyncUserInputQuestion] | None = None
     text: str
     type: Annotated[Literal["agentMessage"], Field(title="AgentMessageThreadItemType")]
@@ -1837,7 +1862,8 @@ class ThreadResumeParams(WireModel):
     ] = None
     history: Annotated[
         list[
-            MessageResponseItem
+            AdditionalToolsResponseItem
+            | MessageResponseItem
             | AgentMessageResponseItem
             | ReasoningResponseItem
             | LocalShellCallResponseItem
@@ -1954,6 +1980,13 @@ class Turn(WireModel):
             description="Describes how much of `items` has been loaded for this turn.",
         ),
     ] = "full"
+    root_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="rootTurnId",
+            description="ID of the first turn in the chain of work that led to this turn. Pass this as `rootTurnId` when starting work on behalf of this turn. May be null in older history or a `review/start` response.",
+        ),
+    ] = None
     started_at: Annotated[
         int | None,
         Field(
@@ -2703,6 +2736,13 @@ class TurnStartParams(WireModel):
             description="Optional JSON Schema used to constrain the final assistant message for this turn.",
         ),
     ] = None
+    parent_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="parentTurnId",
+            description="ID of the turn that caused this new turn to start.\n\nSet this when starting work on behalf of another turn, such as delegated work in a different thread. Leave unset for work started directly by the user. Ignored when this request adds input to an active turn.",
+        ),
+    ] = None
     permissions: Annotated[
         str | None,
         Field(
@@ -2720,6 +2760,13 @@ class TurnStartParams(WireModel):
         Field(
             alias="responsesapiClientMetadata",
             description='Optional metadata to enrich Codex\'s ResponsesAPI turn metadata.\n\nEntries are flattened into the JSON string sent as `client_metadata["x-codex-turn-metadata"]` on ResponsesAPI HTTP and websocket requests.\n\nThey are not sent as top-level ResponsesAPI `client_metadata` keys, and reserved keys such as `session_id`, `thread_id`, `turn_id`, and `window_id` cannot be overridden.',
+        ),
+    ] = None
+    root_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="rootTurnId",
+            description="ID of the first turn in the chain of work that led to this new turn.\n\nWhen setting `parentTurnId`, set this to the parent turn's `rootTurnId` when known. This keeps descendant work attributed to the original turn. If omitted, the new turn becomes its own root. Ignored when this request adds input to an active turn.",
         ),
     ] = None
     runtime_workspace_roots: Annotated[

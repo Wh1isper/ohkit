@@ -7,7 +7,7 @@ description: Run a configured Codex app-server through typed asynchronous execut
 
 Use Python 3.13 or newer. This source checkout implements Thread/Run execution and Codex control. Earlier published bootstrap releases expose version metadata only; install the implementation from this checkout until a release containing it is available.
 
-Codex must be installed separately and configured with access to its native model provider. The adapter is tested against Codex `0.161.0`; see [Codex compatibility](codex.md#compatibility-and-validation). The default installation includes the `websockets` dependency for WebSocket control; no extra is required. Documentation tools are separate developer dependencies.
+Codex must be installed separately and configured with access to its native model provider. Use the tested native version listed in [Codex compatibility](codex.md#compatibility-and-validation). The default installation includes the `websockets` dependency for WebSocket control; no extra is required. Documentation tools are separate developer dependencies.
 
 ## Install from source
 

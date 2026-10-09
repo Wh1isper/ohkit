@@ -1,4 +1,4 @@
-"""Reproducible Codex wire models and explicit upstream drift checks.
+"""Reproducible Codex wire models and native upstream regression checks.
 
 Only this development tool knows schema locations and generation options. The
 installed package neither downloads Codex nor generates code at import time.
@@ -11,14 +11,19 @@ import difflib
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
 import urllib.request
+import xml.etree.ElementTree as ET
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "protocol/codex"
@@ -154,11 +159,13 @@ def collect_schema(directory: Path) -> dict:
 
 
 def export_schema(binary: Path, version: str, directory: Path) -> dict:
-    actual = subprocess.check_output([str(binary), "--version"], text=True).strip()
+    actual = subprocess.check_output([str(binary), "--version"], text=True, timeout=10).strip()
     if actual != f"codex-cli {version}":
         raise ValueError(f"Expected Codex {version}, found {actual}")
     subprocess.run(
-        [str(binary), "app-server", "generate-json-schema", "--experimental", "--out", str(directory)], check=True
+        [str(binary), "app-server", "generate-json-schema", "--experimental", "--out", str(directory)],
+        check=True,
+        timeout=60,
     )
     return collect_schema(directory)
 
@@ -291,13 +298,11 @@ def upstream_report(baseline: dict, current: dict, old: dict, new: dict) -> str:
     removed = sorted(before.keys() - after.keys())
     changed = sorted(k for k in before.keys() & after.keys() if before[k] != after[k])
     lines = [
-        "# Codex protocol maintenance",
+        "## Schema review",
         "",
-        f"- Tested baseline: `{baseline['version']}`",
-        f"- Latest stable release: `{current['version']}`",
         f"- Selected definitions: {len(added)} added, {len(removed)} removed, {len(changed)} changed.",
         "",
-        "A version or schema difference is a review signal, not evidence of compatibility or a breaking change.",
+        "Version/schema differences are informational. Only native test outcomes determine the regression status.",
         "",
     ]
     for title, names in (("Added", added), ("Removed", removed), ("Changed", changed)):
@@ -314,52 +319,160 @@ def upstream_report(baseline: dict, current: dict, old: dict, new: dict) -> str:
     return "\n".join(lines)
 
 
-def check_upstream(output: Path) -> int:
-    """Return 0 for current, 1 for drift, 2 for an inconclusive check."""
-    output.mkdir(parents=True, exist_ok=True)
-    # Do not leave a previous successful comparison attached to a failed rerun.
-    for name in ("schema.diff", "schema.json"):
-        (output / name).unlink(missing_ok=True)
-    baseline = json.loads((SOURCE / "manifest.json").read_text())
-    current: dict = {}
+@dataclass(frozen=True)
+class NativeResult:
+    status: Literal["passed", "failed", "inconclusive"]
+    cases: tuple[str, ...] = ()
+    failures: tuple[str, ...] = ()
+    detail: str = ""
+
+
+def native_result(path: Path, returncode: int) -> NativeResult:
+    """Require a complete, non-skipped pytest suite, not merely exit zero."""
     try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as error:
+        return NativeResult("inconclusive", detail=f"Missing or invalid JUnit report: {error}")
+    tests = root.findall(".//testcase")
+    cases = tuple(sorted(f"{case.get('classname')}::{case.get('name')}" for case in tests))
+    failures = tuple(
+        sorted(f"{case.get('classname')}::{case.get('name')}" for case in tests if case.find("failure") is not None)
+    )
+    if not cases or len(set(cases)) != len(cases) or root.findall(".//error") or root.findall(".//skipped"):
+        return NativeResult("inconclusive", cases, failures, "Empty, skipped, duplicate, or errored test cases")
+    if returncode == 0 and not failures:
+        return NativeResult("passed", cases)
+    if returncode == 1 and failures:
+        return NativeResult("failed", cases, failures)
+    return NativeResult("inconclusive", cases, failures, f"Unexpected pytest exit {returncode}")
+
+
+def run_native(binary: Path, version: str, output: Path) -> NativeResult:
+    """Run unchanged repository code with a verified executable on Linux CI."""
+    output.mkdir(parents=True, exist_ok=True)
+    junit = output / "junit.xml"
+    junit.unlink(missing_ok=True)
+    env = dict(os.environ)
+    env.update(OHKIT_TEST_NATIVE="1", OHKIT_CODEX_BINARY=str(binary.resolve()), OHKIT_CODEX_TEST_VERSION=version)
+    # Ambient pytest selection flags must not turn partial coverage into green.
+    env.pop("PYTEST_ADDOPTS", None)
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests/test_codex_native.py",
+        "-q",
+        "-o",
+        "addopts=--import-mode=importlib",
+        # The suite deadline owns timeout classification; pytest-timeout's
+        # per-test pytest.fail() would otherwise look like a native regression.
+        "--timeout=0",
+        f"--junitxml={junit}",
+    ]
+    with (output / "pytest.log").open("w") as log:
+        with subprocess.Popen(command, cwd=ROOT, env=env, stdout=log, stderr=log, start_new_session=True) as process:
+            try:
+                returncode = process.wait(timeout=300)
+            except subprocess.TimeoutExpired:
+                # The native servers are descendants; killing pytest alone leaks them.
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                return NativeResult("inconclusive", detail="Native suite exceeded 300s; process group terminated")
+    return native_result(junit, returncode)
+
+
+def regression_status(baseline: NativeResult, candidate: NativeResult) -> int:
+    if baseline.status != "passed" or candidate.status == "inconclusive" or baseline.cases != candidate.cases:
+        return 2
+    return 1 if candidate.status == "failed" else 0
+
+
+def check_upstream(output: Path) -> int:
+    """Return 0 for covered paths passing, 1 for regression, 2 for inconclusive."""
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    # Clear only our artifacts, never arbitrary caller-owned output contents.
+    for name in (
+        "report.md",
+        "result.json",
+        "schema.diff",
+        "schema.json",
+        "baseline/pytest.log",
+        "baseline/junit.xml",
+        "candidate/pytest.log",
+        "candidate/junit.xml",
+    ):
+        (output / name).unlink(missing_ok=True)
+    baseline: dict = {}
+    current: dict = {}
+    reference = candidate = NativeResult("inconclusive", detail="Not run")
+    schema_status = "unavailable"
+    report = "# Codex protocol maintenance\n\n"
+    status = 2
+    try:
+        if sys.platform != "linux" or platform.machine() != "x86_64":
+            raise ValueError("Upstream regression checks require Linux x86_64; use native tests on other platforms")
+        baseline = json.loads((SOURCE / "manifest.json").read_text())
         current = asset_metadata(release())
-        old = json.loads((SOURCE / "schema.json").read_text())
+        report += f"- Tested baseline: `{baseline['version']}`\n- Latest stable release: `{current['version']}`\n\n"
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            binary = download_binary(current, directory)
-            new = export_schema(binary, current["version"], directory / "schemas")
-        status = int(baseline["version"] != current["version"] or old != new)
-        report = upstream_report(baseline, current, old, new)
-        (output / "schema.diff").write_text(
-            "".join(
-                difflib.unified_diff(
-                    canonical(old).splitlines(True),
-                    canonical(new).splitlines(True),
-                    fromfile=baseline["version"],
-                    tofile=current["version"],
+            reference_dir = directory / "baseline"
+            reference_dir.mkdir()
+            reference_binary = download_binary(baseline, reference_dir)
+            reference = run_native(reference_binary, baseline["version"], output / "baseline")
+            if baseline["version"] == current["version"] and baseline["archive_sha256"] == current["archive_sha256"]:
+                binary = reference_binary
+                candidate = reference
+                report += "Latest and baseline are the same verified asset; the native result is reused.\n\n"
+            else:
+                candidate_dir = directory / "candidate"
+                candidate_dir.mkdir()
+                binary = download_binary(current, candidate_dir)
+                candidate = run_native(binary, current["version"], output / "candidate")
+            status = regression_status(reference, candidate)
+            # Schema extraction is supplementary evidence, never a test oracle.
+            try:
+                old = json.loads((SOURCE / "schema.json").read_text())
+                new = export_schema(binary, current["version"], directory / "schemas")
+                schema_status = "unchanged" if old == new else "changed"
+                report += upstream_report(baseline, current, old, new)
+                (output / "schema.diff").write_text(
+                    "".join(
+                        difflib.unified_diff(
+                            canonical(old).splitlines(True),
+                            canonical(new).splitlines(True),
+                            fromfile=baseline["version"],
+                            tofile=current["version"],
+                        )
+                    )
                 )
-            )
-        )
-        (output / "schema.json").write_text(canonical(new))
+                (output / "schema.json").write_text(canonical(new))
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                report += f"Schema comparison unavailable: {type(error).__name__}: {error}\n\n"
     except (OSError, ValueError, KeyError, StopIteration, tarfile.TarError, subprocess.SubprocessError) as error:
-        status = 1 if isinstance(error, SurfaceChanged) else 2
-        report = (
-            "# Codex protocol maintenance\n\n"
-            f"- Tested baseline: `{baseline['version']}`\n"
-            f"- Latest stable release: `{current.get('version', 'unavailable')}`\n\n"
-            f"{type(error).__name__}: {error}\n\n"
-            "Schema comparison did not complete. Inspect the failure before changing the baseline.\n"
-        )
-    state = ("current", "drift", "inconclusive")[status]
-    report += f"\nStatus: **{state}** (exit {status}).\n"
+        status = 2
+        report += f"Check could not complete: {type(error).__name__}: {error}\n\n"
+    state = ("passed", "regression", "inconclusive")[status]
+    report += (
+        f"\n## Native regression check\n\nStatus: **{state}** (exit {status}).\n\n"
+        f"- Baseline: **{reference.status}**, {len(reference.cases)} cases. {reference.detail}\n"
+        f"- Candidate: **{candidate.status}**, {len(candidate.cases)} cases. {candidate.detail}\n"
+        f"- Schema: **{schema_status}** (informational only).\n\n"
+        "The same unmodified adapter and test suite run against both executables; models are not regenerated. "
+        "Passing covers only these deterministic native scenarios, not every protocol variant or live provider. "
+        "A regression means candidate test failures with a passing baseline and matching case coverage; "
+        "inspect pytest logs/JUnit before attributing the cause. Inconclusive is a check failure, not a compatibility verdict.\n"
+    )
     (output / "report.md").write_text(report)
     (output / "result.json").write_text(
         canonical(
             {
                 "status": state,
-                "baseline": baseline["version"],
+                "baseline": baseline.get("version"),
                 "latest": current.get("version"),
+                "schema": schema_status,
+                "native": {"baseline": asdict(reference), "candidate": asdict(candidate)},
             }
         )
     )
