@@ -6,6 +6,8 @@ import asyncio
 import os
 from typing import Protocol
 
+from websockets.asyncio.client import ClientConnection, connect
+
 from ...errors import CleanupError, ProtocolError, UnavailableError
 from .options import CodexOptions
 
@@ -84,16 +86,11 @@ class Stdio:
 
 
 class WebSocket:
-    def __init__(self, connection: Transport) -> None:
+    def __init__(self, connection: ClientConnection) -> None:
         self.connection = connection
 
     @classmethod
-    async def open(cls, options: CodexOptions) -> Transport:
-        # Optional at import and install time; the stdlib stdio path stays independent.
-        try:
-            from websockets.asyncio.client import connect
-        except ImportError as exc:
-            raise UnavailableError("WebSocket control requires ohkit[codex-websocket]") from exc
+    async def open(cls, options: CodexOptions) -> WebSocket:
         assert options.websocket_url is not None
         try:
             connection = await connect(
@@ -108,18 +105,7 @@ class WebSocket:
         except Exception:
             # Upstream connection errors may include credentialed headers or URLs.
             raise UnavailableError("Could not connect to the remote Codex service") from None
-        return _WebSocketConnection(connection)
-
-
-class _Socket(Protocol):
-    async def recv(self) -> str | bytes: ...
-    async def send(self, message: str) -> None: ...
-    async def close(self) -> None: ...
-
-
-class _WebSocketConnection:
-    def __init__(self, connection: _Socket) -> None:
-        self.connection = connection
+        return cls(connection)
 
     async def receive(self) -> str:
         try:

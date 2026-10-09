@@ -55,36 +55,9 @@ class RPC:
             while True:
                 message = obj(loads(await self.transport.receive()))
                 if "method" in message:
-                    if "result" in message or "error" in message:
-                        raise ProtocolError("Native request contains response fields")
-                    method = string(message["method"])
-                    params = obj(message.get("params", {}))
-                    if "id" in message:
-                        identity = request_id(message["id"])
-                        if identity in self.requests:
-                            raise ProtocolError("Duplicate live native interaction identity")
-                        self.requests[identity] = object()
-                        self.request(identity, method, params)
-                    else:
-                        if method == "serverRequest/resolved":
-                            self.requests.pop(request_id(params["requestId"]), None)
-                        self.notification(method, params)
+                    self._dispatch(message)
                 elif "id" in message:
-                    identity = request_id(message["id"])
-                    pending = self.pending.get(identity)
-                    if pending is None:
-                        raise ProtocolError("Uncorrelated native response")
-                    method, future = pending
-                    if ("result" in message) == ("error" in message):
-                        raise ProtocolError("Native response must contain exactly one result or error")
-                    if "error" in message:
-                        error = obj(message["error"])
-                        future.set_exception(
-                            NativeRejectedError(method, integer(error["code"]), string(error["message"]))
-                        )
-                    elif "result" in message:
-                        future.set_result(obj(message["result"]))
-                    self.pending.pop(identity)
+                    self._resolve(message)
                 else:
                     raise ProtocolError("Invalid native message envelope")
         except asyncio.CancelledError:
@@ -92,11 +65,46 @@ class RPC:
         except Exception as exc:
             self.fail(exc)
 
+    def _dispatch(self, message: dict[str, JSONValue]) -> None:
+        if "result" in message or "error" in message:
+            raise ProtocolError("Native request contains response fields")
+        method = string(message["method"])
+        params = obj(message.get("params", {}))
+        if "id" in message:
+            identity = request_id(message["id"])
+            if identity in self.requests:
+                raise ProtocolError("Duplicate live native interaction identity")
+            self.requests[identity] = object()
+            self.request(identity, method, params)
+        else:
+            if method == "serverRequest/resolved":
+                self.requests.pop(request_id(params["requestId"]), None)
+            self.notification(method, params)
+
+    def _resolve(self, message: dict[str, JSONValue]) -> None:
+        identity = request_id(message["id"])
+        pending = self.pending.get(identity)
+        if pending is None:
+            raise ProtocolError("Uncorrelated native response")
+        method, future = pending
+        if ("result" in message) == ("error" in message):
+            raise ProtocolError("Native response must contain exactly one result or error")
+        if "error" in message:
+            error = obj(message["error"])
+            future.set_exception(NativeRejectedError(method, integer(error["code"]), string(error["message"])))
+        else:
+            future.set_result(obj(message["result"]))
+        # Keep it pending until validation succeeds so fail() can settle bad replies.
+        self.pending.pop(identity)
+
     async def send(self, message: dict[str, JSONValue]) -> None:
         if self.failure is not None:
             raise UnavailableError("Codex connection unavailable")
         try:
             async with self.write_lock:
+                # The reader can fail the connection while this write is queued.
+                if self.failure is not None:
+                    raise UnavailableError("Codex connection unavailable")
                 await self.transport.send(dumps(message))
         except asyncio.CancelledError:
             self.fail(UnknownOutcomeError("Native write cancelled after possible dispatch"))

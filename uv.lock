@@ -211,9 +211,7 @@ wheels = [
 name = "ohkit"
 version = "0.0.0"
 source = { editable = "." }
-
-[package.optional-dependencies]
-codex-websocket = [
+dependencies = [
     { name = "websockets" },
 ]
 
@@ -232,12 +230,10 @@ dev = [
     { name = "pytest-xdist" },
     { name = "pyyaml" },
     { name = "ruff" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "websockets", marker = "extra == 'codex-websocket'", specifier = ">=15,<16" }]
-provides-extras = ["codex-websocket"]
+requires-dist = [{ name = "websockets", specifier = ">=15,<16" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -254,7 +250,6 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8,<4" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "ruff", specifier = ">=0.16,<0.17" },
-    { name = "websockets", specifier = ">=15,<16" },
 ]
 
 [[package]]

@@ -24,7 +24,7 @@ The documentation workflow builds and validates pull-request content without dep
 
 ## Package Boundary
 
-Repository, distribution, and import names are `ohkit`. Python 3.13 is the minimum version. The core has no third-party runtime dependencies. Integration-specific runtime dependencies belong to optional extras; importing the core or an adapter must not require unused optional transports. Wheels and source distributions contain package code, metadata, README, and license, not repository automation, Skills, or credentials. The source distribution can rebuild the wheel without Node.js or Rust. Installed package metadata owns `ohkit.__version__`.
+Repository, distribution, and import names are `ohkit`. Python 3.13 is the minimum version. WebSocket transport support is included in the default installation through the `websockets` runtime dependency. Backend SDKs may use optional extras; shared values and execution remain independent of backend SDKs. Wheels and source distributions contain package code, metadata, README, and license, not repository automation, Skills, or credentials. The source distribution can rebuild the wheel without Node.js or Rust. Installed package metadata owns `ohkit.__version__`.
 
 ## Release Boundary
 

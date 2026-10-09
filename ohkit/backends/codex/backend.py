@@ -7,10 +7,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Coroutine
 from types import TracebackType
+from typing import Literal
 from uuid import uuid4
 
 from ..._json import integer, native, obj, optional_string, string
 from ...errors import (
+    BusyError,
     CleanupError,
     InactiveRunError,
     NativeRejectedError,
@@ -48,6 +50,12 @@ from ._transport import Stdio, WebSocket, local_scope
 from .options import CodexOptions, CodexThreadOptions
 
 CAPABILITIES = Capabilities(steer=True, resume=True, fork=True, approvals=True, questions=True)
+_DELTA_CHANNELS: dict[str, Literal["assistant", "reasoning", "tool"]] = {
+    "item/agentMessage/delta": "assistant",
+    "item/reasoning/summaryTextDelta": "reasoning",
+    "item/reasoning/textDelta": "reasoning",
+    "item/commandExecution/outputDelta": "tool",
+}
 
 
 def _input_item(value: object) -> JSONValue:
@@ -118,14 +126,14 @@ class Codex:
             )
             await self._rpc.send({"method": "initialized"})
         except BaseException:
-            await _settle(asyncio.create_task(self.close()))
+            await self.close()
             raise
         return self
 
     async def __aexit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
     ) -> None:
-        await _settle(asyncio.create_task(self.close()))
+        await self.close()
 
     def _connection(self) -> RPC:
         if self._rpc is None or self._closed or self._rpc.failure is not None:
@@ -172,8 +180,6 @@ class Codex:
             raise ValueError("Thread reference belongs to another backend/history scope")
         previous = self._threads.get(ref.id)
         if previous is not None and previous.thread._active is not None:
-            from ...errors import BusyError
-
             raise BusyError("Cannot reopen native history while this backend owns an active Run")
 
     async def resume(
@@ -445,64 +451,46 @@ class _RunDriver:
         # Only explicitly correlated foreground observations belong to this Run.
         if params.get("turnId") != self.turn_id or self.turn_id is None or self.terminal is not None:
             return
-        if method in (
-            "item/agentMessage/delta",
-            "item/reasoning/summaryTextDelta",
-            "item/reasoning/textDelta",
-            "item/commandExecution/outputDelta",
-        ):
-            channel = (
-                "assistant"
-                if method == "item/agentMessage/delta"
-                else "tool"
-                if "commandExecution" in method
-                else "reasoning"
-            )
+        channel = _DELTA_CHANNELS.get(method)
+        if channel is not None:
             self.run._emit(
                 ContentEvent(self.run.thread, self.run.id, string(params["itemId"]), string(params["delta"]), channel)
             )
         elif method in ("item/started", "item/completed"):
-            item = obj(params["item"])
-            kind = string(item["type"])
-            identity = string(item["id"])
-            if kind == "userMessage":
-                client_id = optional_string(item.get("clientId"))
-                if client_id is not None:
-                    self.recorded.add(client_id)
-            elif kind in ("agentMessage", "reasoning"):
-                if item.get("delivery") is None:
-                    if method == "item/started" and identity not in self.model_items:
-                        # on_task_finished also records unsampled pending prompts.
-                        # A new foreground model item after prompt recording is
-                        # required; history/clientId alone is not consumption.
-                        self.consumed.update(self.recorded)
-                    if kind == "agentMessage" and method == "item/completed":
-                        self.output[identity] = string(item["text"])
-                self.model_items.add(identity)
-            elif kind not in ("agentMessage", "reasoning", "plan", "hookPrompt"):
-                self.run._emit(
-                    ToolEvent(
-                        self.run.thread,
-                        self.run.id,
-                        identity,
-                        kind,
-                        "started" if method.endswith("started") else "completed",
-                        native(item),
-                    )
-                )
+            self._observe_item(obj(params["item"]), "started" if method == "item/started" else "completed")
         elif method == "thread/tokenUsage/updated":
             # last = current native Turn, total = conversation lifetime.
             last = obj(obj(params["tokenUsage"])["last"])
             self.usage = Usage(
-                integer(last["inputTokens"]),
-                integer(last["outputTokens"]),
-                integer(last["cachedInputTokens"]),
-                integer(last["reasoningOutputTokens"]),
-                integer(last["totalTokens"]),
+                input_tokens=integer(last["inputTokens"]),
+                output_tokens=integer(last["outputTokens"]),
+                cached_input_tokens=integer(last["cachedInputTokens"]),
+                reasoning_output_tokens=integer(last["reasoningOutputTokens"]),
+                total_tokens=integer(last["totalTokens"]),
             )
             self.run._emit(UsageEvent(self.run.thread, self.run.id, self.usage))
         else:
             self.run._emit(NativeEvent(self.run.thread, self.run.id, method, native(params)))
+
+    def _observe_item(self, item: dict[str, JSONValue], phase: Literal["started", "completed"]) -> None:
+        kind = string(item["type"])
+        identity = string(item["id"])
+        if kind == "userMessage":
+            client_id = optional_string(item.get("clientId"))
+            if client_id is not None:
+                self.recorded.add(client_id)
+        elif kind in ("agentMessage", "reasoning"):
+            if item.get("delivery") is None:
+                if phase == "started" and identity not in self.model_items:
+                    # on_task_finished also records unsampled pending prompts.
+                    # A new foreground model item after prompt recording is
+                    # required; history/clientId alone is not consumption.
+                    self.consumed.update(self.recorded)
+                if kind == "agentMessage" and phase == "completed":
+                    self.output[identity] = string(item["text"])
+            self.model_items.add(identity)
+        elif kind not in ("plan", "hookPrompt"):
+            self.run._emit(ToolEvent(self.run.thread, self.run.id, identity, kind, phase, native(item)))
 
     def request(self, identity: RequestID, method: str, params: dict[str, JSONValue]) -> None:
         if identity in self.interactions:
@@ -647,15 +635,15 @@ class _RunDriver:
         if self.failure is None:
             self.failure = self.native_failure
         result = Result(
-            self.run.thread,
-            self.run.id,
-            outcome,
-            "\n".join(self.output.values()),
-            self.usage,
-            self.failure,
-            self.turn_id,
-            status,
-            None if self.terminal is None else native(self.terminal),
+            thread=self.run.thread,
+            run_id=self.run.id,
+            outcome=outcome,
+            output="\n".join(self.output.values()),
+            usage=self.usage,
+            failure=self.failure,
+            native_turn_id=self.turn_id,
+            native_status=status,
+            native=None if self.terminal is None else native(self.terminal),
         )
         if self.cleanup_error is not None:
             self.cleanup_error.result = result

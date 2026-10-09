@@ -30,7 +30,7 @@ Closing the backend first settles live Runs, then closes stdin and waits for the
 
 ## Borrowed WebSocket service
 
-Install `ohkit[codex-websocket]` (or `'.[codex-websocket]'` from source). Start and secure the native service yourself; pass its URL and optional authentication headers:
+WebSocket control is included in the default installation. Start and secure the native service yourself; pass its URL and optional authentication headers:
 
 ```python
 options = CodexOptions(

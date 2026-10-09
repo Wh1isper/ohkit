@@ -14,10 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = []
-
-[project.optional-dependencies]
-codex-websocket = ["websockets>=15,<16"]
+dependencies = ["websockets>=15,<16"]
 
 [project.urls]
 Homepage = "https://ohkit.wh1isper.top"
@@ -50,7 +47,6 @@ dev = [
     "pytest-xdist>=3.8,<4",
     "pyyaml>=6,<7",
     "ruff>=0.16,<0.17",
-    "websockets>=15,<16",
 ]
 
 [tool.uv]

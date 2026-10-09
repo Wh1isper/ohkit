@@ -557,6 +557,29 @@ def test_resolved_unsupported_request_cannot_send_stale_error_from_write_queue()
     asyncio.run(scenario())
 
 
+def test_connection_failure_while_waiting_for_write_lock_never_dispatches(monkeypatch):
+    async def scenario():
+        async with connected() as (peer, backend):
+            rpc = backend._rpc
+            entered = asyncio.Event()
+            send = rpc.send
+
+            async def queued_send(message):
+                entered.set()
+                await send(message)
+
+            monkeypatch.setattr(rpc, "send", queued_send)
+            async with rpc.write_lock:
+                submission = asyncio.create_task(rpc.call("turn/start", {"threadId": "thread-1", "input": []}))
+                await entered.wait()
+                rpc.fail(ProtocolError("Connection failed while the write was queued"))
+            with pytest.raises(UnknownOutcomeError):
+                await submission
+        assert not any(call["method"] == "turn/start" for call in peer.all_calls)
+
+    asyncio.run(scenario())
+
+
 def test_cleanup_deadline_keeps_native_evidence_and_disables_owner():
     async def scenario():
         entered, release = asyncio.Event(), asyncio.Event()

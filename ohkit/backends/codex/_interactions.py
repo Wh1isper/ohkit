@@ -17,8 +17,6 @@ from ._rpc import RequestID
 
 def _choice(value: JSONValue) -> ApprovalChoice:
     if isinstance(value, str):
-        if value not in ("accept", "acceptForSession", "decline", "cancel"):
-            raise UnsupportedError("Unknown native approval decision")
         match value:
             case "accept":
                 return ApprovalChoice("accept", "action")
@@ -26,8 +24,10 @@ def _choice(value: JSONValue) -> ApprovalChoice:
                 return ApprovalChoice("acceptForSession", "session")
             case "decline":
                 return ApprovalChoice("decline", "action")
-            case _:
+            case "cancel":
                 return ApprovalChoice("cancel", "action")
+            case _:
+                raise UnsupportedError("Unknown native approval decision")
     decision = obj(value)
     if set(decision) == {"acceptWithExecpolicyAmendment"}:
         strings(obj(decision["acceptWithExecpolicyAmendment"])["execpolicy_amendment"])
@@ -41,6 +41,32 @@ def _choice(value: JSONValue) -> ApprovalChoice:
     raise UnsupportedError("Unrepresentable native approval decision")
 
 
+def _command_choices(params: dict[str, JSONValue]) -> tuple[ApprovalChoice, ...]:
+    offered = params.get("availableDecisions")
+    if offered is not None:
+        return tuple(_choice(value) for value in array(offered))
+    # Pinned TUI approval_events.rs default_available_decisions, not all
+    # values the response enum can deserialize. Wider choices would grant
+    # authority the native prompt did not offer.
+    defaults: list[JSONValue] = ["accept"]
+    if params.get("networkApprovalContext") is not None:
+        defaults.append("acceptForSession")
+        amendments = params.get("proposedNetworkPolicyAmendments")
+        if amendments is not None:
+            for value in array(amendments):
+                amendment = obj(value)
+                if amendment.get("action") == "allow":
+                    defaults.append({"applyNetworkPolicyAmendment": {"network_policy_amendment": amendment}})
+                    break
+    elif params.get("additionalPermissions") is None:
+        amendment = params.get("proposedExecpolicyAmendment")
+        if amendment is not None:
+            strings(amendment)
+            defaults.append({"acceptWithExecpolicyAmendment": {"execpolicy_amendment": amendment}})
+    defaults.append("cancel")
+    return tuple(_choice(value) for value in defaults)
+
+
 def approval(
     ref: ThreadRef, run_id: str, identity: RequestID, method: str, params: dict[str, JSONValue]
 ) -> ApprovalRequest:
@@ -48,29 +74,7 @@ def approval(
     reason = optional_string(params.get("reason"))
     choices: tuple[ApprovalChoice, ...]
     if method == "item/commandExecution/requestApproval":
-        offered = params.get("availableDecisions")
-        if offered is None:
-            # Pinned TUI approval_events.rs default_available_decisions, not all
-            # values the response enum can deserialize. Wider choices would grant
-            # authority the native prompt did not offer.
-            defaults: list[JSONValue] = ["accept"]
-            if params.get("networkApprovalContext") is not None:
-                defaults.append("acceptForSession")
-                amendments = params.get("proposedNetworkPolicyAmendments")
-                if amendments is not None:
-                    for value in array(amendments):
-                        amendment = obj(value)
-                        if amendment.get("action") == "allow":
-                            defaults.append({"applyNetworkPolicyAmendment": {"network_policy_amendment": amendment}})
-                            break
-            elif params.get("additionalPermissions") is None:
-                amendment = params.get("proposedExecpolicyAmendment")
-                if amendment is not None:
-                    strings(amendment)
-                    defaults.append({"acceptWithExecpolicyAmendment": {"execpolicy_amendment": amendment}})
-            defaults.append("cancel")
-            offered = defaults
-        choices = tuple(_choice(value) for value in array(offered))
+        choices = _command_choices(params)
         return ApprovalRequest(
             ref,
             run_id,

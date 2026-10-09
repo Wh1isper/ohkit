@@ -1,4 +1,4 @@
-"""Codex control backend; optional transports are loaded only when selected."""
+"""Codex control over owned stdio or a connection to a borrowed WebSocket service."""
 
 from .backend import Codex
 from .options import CodexOptions, CodexThreadOptions

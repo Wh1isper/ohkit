@@ -30,12 +30,52 @@ def check_wheel(path: Path, version: str) -> None:
         license_text = archive.read(prefix + "licenses/LICENSE").decode()
         assert license_text.startswith("MIT License\n")
         assert "Copyright (c) 2026 Converge AI" in license_text
-        requirements = metadata.get_all("Requires-Dist", [])
-        assert requirements and all(
-            "extra == 'codex-websocket'" in item or 'extra == "codex-websocket"' in item for item in requirements
-        )
-        assert not any("a13n" in item or "pydantic" in item for item in requirements)
+        assert metadata.get_all("Requires-Dist", []) == ["websockets<16,>=15"]
+        assert metadata.get_all("Provides-Extra", []) == []
         assert "Root-Is-Purelib: true" in archive.read(prefix + "WHEEL").decode()
+
+
+def rebuild_sdist(sdist: Path, work: Path, version: str) -> Path:
+    with tarfile.open(sdist) as archive:
+        names = {item.name for item in archive.getmembers() if item.isfile()}
+        base = f"ohkit-{version}/"
+        assert base + "ohkit/py.typed" in names
+        assert base + "LICENSE" in names
+        root_files = {base + item for item in ("pyproject.toml", "README.md", "LICENSE", "PKG-INFO", ".gitignore")}
+        assert all(name.startswith(base + "ohkit/") or name in root_files for name in names), names
+        archive.extractall(work, filter="data")
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(work / "rebuilt"), str(work / f"ohkit-{version}")],
+        check=True,
+        cwd=work,
+    )
+    return work / "rebuilt" / f"ohkit-{version}-py3-none-any.whl"
+
+
+def check_install(wheel: Path, work: Path, version: str) -> None:
+    environment = work / "venv"
+    subprocess.run(["uv", "venv", "--python", sys.executable, str(environment)], check=True, cwd=work)
+    interpreter = environment / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    subprocess.run(["uv", "pip", "install", "--python", str(interpreter), str(wheel)], check=True, cwd=work)
+    subprocess.run(
+        [
+            str(interpreter),
+            "-I",
+            "-c",
+            f"""import ohkit
+from ohkit import Thread, Run, NativeData
+from ohkit.backends.codex import Codex
+from websockets.asyncio.client import connect
+assert ohkit.__version__ == {version!r}
+assert callable(connect)
+assert Codex().capabilities.steer
+assert NativeData('codex', '{{"ok":true}}').decode() == {{'ok': True}}
+print(ohkit.__version__)
+""",
+        ],
+        check=True,
+        cwd=work,
+    )
 
 
 def main() -> None:
@@ -50,71 +90,9 @@ def main() -> None:
     check_wheel(wheel, version)
     with tempfile.TemporaryDirectory(prefix="ohkit-dist-") as temporary:
         work = Path(temporary)
-        with tarfile.open(sdist) as archive:
-            names = {item.name for item in archive.getmembers() if item.isfile()}
-            base = f"ohkit-{version}/"
-            assert base + "ohkit/py.typed" in names
-            assert base + "LICENSE" in names
-            assert all(
-                name.startswith(base + "ohkit/")
-                or name
-                in {base + item for item in ("pyproject.toml", "README.md", "LICENSE", "PKG-INFO", ".gitignore")}
-                for name in names
-            ), names
-            archive.extractall(work, filter="data")
-        subprocess.run(
-            ["uv", "build", "--wheel", "--out-dir", str(work / "rebuilt"), str(work / f"ohkit-{version}")],
-            check=True,
-            cwd=work,
-        )
-        check_wheel(work / "rebuilt" / wheel.name, version)
-        environment = work / "venv"
-        subprocess.run(["uv", "venv", "--python", sys.executable, str(environment)], check=True, cwd=work)
-        interpreter = environment / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        subprocess.run(
-            ["uv", "pip", "install", "--python", str(interpreter), "--no-deps", str(wheel)], check=True, cwd=work
-        )
-        subprocess.run(
-            [
-                str(interpreter),
-                "-I",
-                "-c",
-                f"""import asyncio, importlib.util, ohkit
-from ohkit import Thread, Run, NativeData, UnavailableError
-from ohkit.backends.codex import Codex, CodexOptions
-assert ohkit.__version__ == {version!r}
-assert importlib.util.find_spec('websockets') is None
-assert Codex().capabilities.steer
-assert NativeData('codex', '{{"ok":true}}').decode() == {{'ok': True}}
-async def missing_extra():
-    try:
-        async with Codex(options=CodexOptions(websocket_url='ws://127.0.0.1:1', history_scope='test')):
-            raise AssertionError('Optional dependency unexpectedly available')
-    except UnavailableError as error:
-        assert 'codex-websocket' in str(error)
-asyncio.run(missing_extra())
-print(ohkit.__version__)
-""",
-            ],
-            check=True,
-            cwd=work,
-        )
-        subprocess.run(
-            ["uv", "pip", "install", "--python", str(interpreter), str(wheel) + "[codex-websocket]"],
-            check=True,
-            cwd=work,
-        )
-        subprocess.run(
-            [
-                str(interpreter),
-                "-I",
-                "-c",
-                "from ohkit.backends.codex import Codex; from websockets.asyncio.client import connect; assert callable(connect)",
-            ],
-            check=True,
-            cwd=work,
-        )
-    print(f"Validated ohkit {version}: wheel, sdist rebuild, isolated core and optional transport installs")
+        check_wheel(rebuild_sdist(sdist, work, version), version)
+        check_install(wheel, work, version)
+    print(f"Validated ohkit {version}: wheel, sdist rebuild, isolated install with default WebSocket transport")
 
 
 if __name__ == "__main__":
