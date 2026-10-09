@@ -11,6 +11,6 @@ def test_version_matches_installed_distribution() -> None:
 def test_distribution_is_independent_and_typed() -> None:
     assert metadata("ohkit")["Name"] == "ohkit"
     requirements = metadata("ohkit").get_all("Requires-Dist", [])
-    assert requirements == ["websockets<16,>=15"]
+    assert requirements == ["pydantic<3,>=2.12", "websockets<16,>=15"]
     assert metadata("ohkit").get_all("Provides-Extra", []) == []
     assert files("ohkit").joinpath("py.typed").is_file()

@@ -1,0 +1,44 @@
+name: Codex upstream
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: codex-upstream-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Compare latest stable release with the tested baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make codex-upstream-check
+      - name: Retain drift or diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-upstream
+          path: test-results/codex-upstream/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,23 @@
+{
+  "model": "fixture",
+  "modelProvider": "fixture",
+  "cwd": "/project",
+  "approvalPolicy": "never",
+  "approvalsReviewer": "user",
+  "sandbox": {"type": "dangerFullAccess"},
+  "thread": {
+    "id": "owned-thread",
+    "sessionId": "fixture-session",
+    "projectId": null,
+    "cliVersion": "fixture",
+    "createdAt": 0,
+    "updatedAt": 0,
+    "cwd": "/project",
+    "ephemeral": true,
+    "modelProvider": "fixture",
+    "preview": "",
+    "source": "appServer",
+    "status": {"type": "idle"},
+    "turns": []
+  }
+}

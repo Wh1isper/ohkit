@@ -26,11 +26,15 @@ def check_wheel(path: Path, version: str) -> None:
         assert metadata["Name"] == "ohkit"
         assert metadata["Version"] == version
         assert metadata["Requires-Python"] == ">=3.13"
-        assert metadata["License-Expression"] == "MIT"
+        assert metadata["License-Expression"] == "MIT AND Apache-2.0"
+        assert "ohkit/backends/codex/_generated.py" in names
+        assert "Apache License" in archive.read(prefix + "licenses/third-party/codex/LICENSE").decode()
+        assert "Codex" in archive.read(prefix + "licenses/third-party/codex/NOTICE").decode()
+        assert prefix + "licenses/THIRD_PARTY_NOTICES.md" in names
         license_text = archive.read(prefix + "licenses/LICENSE").decode()
         assert license_text.startswith("MIT License\n")
         assert "Copyright (c) 2026 Converge AI" in license_text
-        assert metadata.get_all("Requires-Dist", []) == ["websockets<16,>=15"]
+        assert metadata.get_all("Requires-Dist", []) == ["pydantic<3,>=2.12", "websockets<16,>=15"]
         assert metadata.get_all("Provides-Extra", []) == []
         assert "Root-Is-Purelib: true" in archive.read(prefix + "WHEEL").decode()
 
@@ -41,8 +45,13 @@ def rebuild_sdist(sdist: Path, work: Path, version: str) -> Path:
         base = f"ohkit-{version}/"
         assert base + "ohkit/py.typed" in names
         assert base + "LICENSE" in names
-        root_files = {base + item for item in ("pyproject.toml", "README.md", "LICENSE", "PKG-INFO", ".gitignore")}
-        assert all(name.startswith(base + "ohkit/") or name in root_files for name in names), names
+        root_files = {
+            base + item
+            for item in ("pyproject.toml", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "PKG-INFO", ".gitignore")
+        }
+        assert all(name.startswith((base + "ohkit/", base + "third-party/")) or name in root_files for name in names), (
+            names
+        )
         archive.extractall(work, filter="data")
     subprocess.run(
         ["uv", "build", "--wheel", "--out-dir", str(work / "rebuilt"), str(work / f"ohkit-{version}")],

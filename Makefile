@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve
+.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve codex-generate codex-check codex-native-test codex-upstream-check
 
 DOCS_PORT ?= 3000
 
@@ -41,11 +41,23 @@ workflow-check: ## Validate GitHub Actions with the main repository's actionlint
 automation-test: ## Test PR change overview with Node.js (automation only)
 	node --test .github/scripts/*.test.cjs
 
-check: lint typecheck deps-check ## Run Python and repository static checks
+check: lint typecheck deps-check codex-check ## Run Python and repository static checks
 
 check-all: check test dist-check ## Run all Python gates, including packaging
 
 verify: check-all ## Validate this single-package repository
+
+codex-generate: ## Regenerate private wire models from the committed schema (offline)
+	uv run --locked python scripts/codex_protocol.py generate
+
+codex-check: ## Check snapshot integrity and byte-identical wire generation (offline)
+	uv run --locked python scripts/codex_protocol.py generate --check
+
+codex-native-test: ## Exercise the pinned real Codex against a loopback model
+	OHKIT_TEST_NATIVE=1 uv run --locked pytest tests/test_codex_native.py -q --junitxml=test-results/codex-native.xml
+
+codex-upstream-check: ## Report latest stable Codex version/schema drift (network)
+	uv run --locked python scripts/codex_protocol.py check-upstream
 
 docs-build: ## Build and type-check the static documentation; validate links
 	pnpm --dir website install --frozen-lockfile

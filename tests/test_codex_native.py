@@ -1,16 +1,13 @@
-"""Real Codex 0.161.0 + deterministic loopback Responses, never paid model calls.
+"""Real pinned Codex + deterministic loopback Responses, never paid model calls.
 
 Opt in with OHKIT_TEST_NATIVE=1. An explicit OHKIT_CODEX_BINARY may replace the
 verified official Linux fixture download; its version is checked before use.
 """
 
 import asyncio
-import hashlib
 import json
 import os
 import platform
-import tarfile
-import urllib.request
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -19,10 +16,9 @@ import pytest
 
 from ohkit import Answer, ContentEvent, Handlers, QuestionResponse, ToolEvent
 from ohkit.backends.codex import Codex, CodexOptions, CodexThreadOptions
+from ohkit.backends.codex._version import CODEX_VERSION
+from scripts.codex_protocol import SOURCE, download_binary
 
-VERSION = "0.161.0"
-ARCHIVE = "codex-x86_64-unknown-linux-musl.tar.gz"
-DIGEST = "b1efb95097660d7f2e5a3887618a23f2ea1b0d548078bf92b0f7a5d229a0cef2"
 pytestmark = pytest.mark.skipif(os.environ.get("OHKIT_TEST_NATIVE") != "1", reason="Opt-in native executable tests")
 
 
@@ -33,13 +29,10 @@ def binary(tmp_path_factory):
         return supplied
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         pytest.skip("Provide OHKIT_CODEX_BINARY for this platform")
-    root = tmp_path_factory.mktemp("codex-0.161.0")
-    archive = root / ARCHIVE
-    urllib.request.urlretrieve(f"https://github.com/openai/codex/releases/download/rust-v{VERSION}/{ARCHIVE}", archive)
-    assert hashlib.sha256(archive.read_bytes()).hexdigest() == DIGEST
-    with tarfile.open(archive) as contents:
-        contents.extractall(root, filter="data")
-    return str(root / "codex-x86_64-unknown-linux-musl")
+    root = tmp_path_factory.mktemp("codex-native")
+    metadata = json.loads((SOURCE / "manifest.json").read_text())
+    assert metadata["version"] == CODEX_VERSION
+    return str(download_binary(metadata, root))
 
 
 class Model:
@@ -136,7 +129,7 @@ class Model:
 async def fixture(binary, root: Path):
     version = await asyncio.create_subprocess_exec(binary, "--version", stdout=asyncio.subprocess.PIPE)
     output, _ = await version.communicate()
-    assert output.decode().strip() == "codex-cli 0.161.0"
+    assert output.decode().strip() == f"codex-cli {CODEX_VERSION}"
     model = Model()
     server = await asyncio.start_server(model.connection, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]

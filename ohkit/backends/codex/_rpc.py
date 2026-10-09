@@ -6,7 +6,9 @@ from collections.abc import Callable, Coroutine
 from ..._json import dumps, integer, loads, obj, string
 from ...errors import NativeRejectedError, ProtocolError, UnavailableError, UnknownOutcomeError
 from ...values import JSONValue
+from . import _generated as wire
 from ._transport import Transport
+from ._wire import WireModel, decode, encode
 
 type RequestID = int | str
 
@@ -113,7 +115,39 @@ class RPC:
             self.fail(exc)
             raise UnknownOutcomeError("Native write failed after possible dispatch") from None
 
-    async def call(self, method: str, params: dict[str, JSONValue]) -> dict[str, JSONValue]:
+    async def initialize(self, params: wire.InitializeParams) -> wire.InitializeResponse:
+        return await self._typed_call("initialize", params, wire.InitializeResponse)
+
+    async def thread_start(self, params: wire.ThreadStartParams) -> wire.ThreadStartResponse:
+        return await self._typed_call("thread/start", params, wire.ThreadStartResponse, omit_none=True)
+
+    async def thread_resume(self, params: wire.ThreadResumeParams) -> wire.ThreadResumeResponse:
+        return await self._typed_call("thread/resume", params, wire.ThreadResumeResponse, omit_none=True)
+
+    async def thread_fork(self, params: wire.ThreadForkParams) -> wire.ThreadForkResponse:
+        return await self._typed_call("thread/fork", params, wire.ThreadForkResponse, omit_none=True)
+
+    async def turn_start(self, params: wire.TurnStartParams) -> wire.TurnStartResponse:
+        return await self._typed_call("turn/start", params, wire.TurnStartResponse)
+
+    async def turn_steer(self, params: wire.TurnSteerParams) -> wire.TurnSteerResponse:
+        return await self._typed_call("turn/steer", params, wire.TurnSteerResponse)
+
+    async def turn_interrupt(self, params: wire.TurnInterruptParams) -> wire.TurnInterruptResponse:
+        return await self._typed_call("turn/interrupt", params, wire.TurnInterruptResponse)
+
+    async def _typed_call[T: WireModel](
+        self, method: str, params: WireModel, result: type[T], *, omit_none: bool = False
+    ) -> T:
+        # Public Thread options use None to inherit native configuration, not clear it.
+        response = await self._call(method, encode(params, exclude_none=omit_none))
+        try:
+            return decode(result, response)
+        except ProtocolError as error:
+            self.fail(error)
+            raise
+
+    async def _call(self, method: str, params: dict[str, JSONValue]) -> dict[str, JSONValue]:
         if self.failure is not None:
             raise UnavailableError("Codex connection unavailable")
         self.next_id += 1

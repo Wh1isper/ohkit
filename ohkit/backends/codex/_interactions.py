@@ -1,6 +1,8 @@
-"""Lossless offered decisions; callers cannot manufacture wider native grants."""
+"""Project validated native interactions without widening offered authority."""
 
-from ..._json import array, boolean, native, obj, optional_string, string, strings
+from typing import Literal
+
+from ..._json import native, obj
 from ...errors import ProtocolError, UnsupportedError
 from ...values import (
     ApprovalChoice,
@@ -12,100 +14,103 @@ from ...values import (
     QuestionResponse,
     ThreadRef,
 )
+from . import _generated as wire
 from ._rpc import RequestID
+from ._wire import decode, encode
+
+type Decision = (
+    Literal["accept", "acceptForSession", "decline", "cancel"]
+    | wire.AcceptWithExecpolicyAmendmentCommandExecutionApprovalDecision
+    | wire.ApplyNetworkPolicyAmendmentCommandExecutionApprovalDecision
+)
 
 
-def _choice(value: JSONValue) -> ApprovalChoice:
+def _choice(value: Decision) -> ApprovalChoice:
     if isinstance(value, str):
-        match value:
-            case "accept":
-                return ApprovalChoice("accept", "action")
-            case "acceptForSession":
-                return ApprovalChoice("acceptForSession", "session")
-            case "decline":
-                return ApprovalChoice("decline", "action")
-            case "cancel":
-                return ApprovalChoice("cancel", "action")
-            case _:
-                raise UnsupportedError("Unknown native approval decision")
-    decision = obj(value)
-    if set(decision) == {"acceptWithExecpolicyAmendment"}:
-        strings(obj(decision["acceptWithExecpolicyAmendment"])["execpolicy_amendment"])
-        return ApprovalChoice("execpolicy", "persistent", native(decision))
-    if set(decision) == {"applyNetworkPolicyAmendment"}:
-        amendment = obj(obj(decision["applyNetworkPolicyAmendment"])["network_policy_amendment"])
-        string(amendment["host"])
-        if amendment["action"] not in ("allow", "deny"):
-            raise UnsupportedError("Unknown network policy action")
-        return ApprovalChoice("network", "persistent", native(decision))
-    raise UnsupportedError("Unrepresentable native approval decision")
+        if value == "acceptForSession":
+            return ApprovalChoice("acceptForSession", "session")
+        return ApprovalChoice(value, "action")
+    if isinstance(value, wire.AcceptWithExecpolicyAmendmentCommandExecutionApprovalDecision):
+        return ApprovalChoice("execpolicy", "persistent", native(encode(value)))
+    return ApprovalChoice("network", "persistent", native(encode(value)))
 
 
-def _command_choices(params: dict[str, JSONValue]) -> tuple[ApprovalChoice, ...]:
-    offered = params.get("availableDecisions")
-    if offered is not None:
-        return tuple(_choice(value) for value in array(offered))
-    # Pinned TUI approval_events.rs default_available_decisions, not all
-    # values the response enum can deserialize. Wider choices would grant
-    # authority the native prompt did not offer.
-    defaults: list[JSONValue] = ["accept"]
-    if params.get("networkApprovalContext") is not None:
-        defaults.append("acceptForSession")
-        amendments = params.get("proposedNetworkPolicyAmendments")
-        if amendments is not None:
-            for value in array(amendments):
-                amendment = obj(value)
-                if amendment.get("action") == "allow":
-                    defaults.append({"applyNetworkPolicyAmendment": {"network_policy_amendment": amendment}})
-                    break
-    elif params.get("additionalPermissions") is None:
-        amendment = params.get("proposedExecpolicyAmendment")
-        if amendment is not None:
-            strings(amendment)
-            defaults.append({"acceptWithExecpolicyAmendment": {"execpolicy_amendment": amendment}})
-    defaults.append("cancel")
-    return tuple(_choice(value) for value in defaults)
+def _command_choices(params: wire.CommandExecutionRequestApprovalParams) -> tuple[ApprovalChoice, ...]:
+    if params.available_decisions is not None:
+        return tuple(_choice(value) for value in params.available_decisions)
+    # Native TUI default_available_decisions, not every deserializable decision.
+    defaults: list[ApprovalChoice] = [_choice("accept")]
+    if params.network_approval_context is not None:
+        defaults.append(_choice("acceptForSession"))
+        for amendment in params.proposed_network_policy_amendments or ():
+            if amendment.action == "allow":
+                defaults.append(
+                    ApprovalChoice(
+                        "network",
+                        "persistent",
+                        native(
+                            {
+                                "applyNetworkPolicyAmendment": {"network_policy_amendment": encode(amendment)},
+                            }
+                        ),
+                    )
+                )
+                break
+    elif params.additional_permissions is None and params.proposed_execpolicy_amendment is not None:
+        defaults.append(
+            ApprovalChoice(
+                "execpolicy",
+                "persistent",
+                native(
+                    {
+                        "acceptWithExecpolicyAmendment": {
+                            "execpolicy_amendment": list(params.proposed_execpolicy_amendment)
+                        },
+                    }
+                ),
+            )
+        )
+    defaults.append(_choice("cancel"))
+    return tuple(defaults)
 
 
 def approval(
     ref: ThreadRef, run_id: str, identity: RequestID, method: str, params: dict[str, JSONValue]
 ) -> ApprovalRequest:
-    item_id = string(params["itemId"])
-    reason = optional_string(params.get("reason"))
-    choices: tuple[ApprovalChoice, ...]
     if method == "item/commandExecution/requestApproval":
-        choices = _command_choices(params)
+        command = decode(wire.CommandExecutionRequestApprovalParams, params)
         return ApprovalRequest(
             ref,
             run_id,
             str(identity),
             "command",
-            item_id,
-            reason,
-            choices,
-            command=optional_string(params.get("command")),
-            cwd=optional_string(params.get("cwd")),
+            command.item_id,
+            command.reason,
+            _command_choices(command),
+            command=command.command,
+            cwd=command.cwd,
             native=native(params),
         )
     if method == "item/fileChange/requestApproval":
-        choices = tuple(_choice(value) for value in ("accept", "acceptForSession", "decline", "cancel"))
+        change = decode(wire.FileChangeRequestApprovalParams, params)
         return ApprovalRequest(
             ref,
             run_id,
             str(identity),
             "file_change",
-            item_id,
-            reason,
-            choices,
-            grant_root=optional_string(params.get("grantRoot")),
+            change.item_id,
+            change.reason,
+            tuple(_choice(value) for value in ("accept", "acceptForSession", "decline", "cancel")),
+            grant_root=change.grant_root,
             native=native(params),
         )
     if method == "item/permissions/requestApproval":
+        permission = decode(wire.PermissionsRequestApprovalParams, params)
         permissions = obj(params["permissions"])
         if set(permissions) - {"fileSystem", "network"}:
             raise UnsupportedError("Unknown native permission family")
-        # Response objects preserve the requested profile exactly. No subset or
-        # invented grants: choose deny, exact turn grant, or exact session grant.
+        # Preserve the exact requested profile. The generated schema validates
+        # structure; our interaction policy decides which grants may be offered.
         choices = (
             ApprovalChoice("decline", "turn", native({"permissions": {}, "scope": "turn"})),
             ApprovalChoice("permissions", "turn", native({"permissions": permissions, "scope": "turn"})),
@@ -116,10 +121,10 @@ def approval(
             run_id,
             str(identity),
             "permissions",
-            item_id,
-            reason,
+            permission.item_id,
+            permission.reason,
             choices,
-            cwd=string(params["cwd"]),
+            cwd=permission.cwd,
             native=native(params),
         )
     raise UnsupportedError("Unsupported native approval method")
@@ -130,10 +135,15 @@ def approval_response(request: ApprovalRequest, choice: ApprovalChoice) -> dict[
         raise ProtocolError("Handler must return an offered approval choice unchanged")
     if request.kind == "permissions":
         assert choice.native is not None
-        return obj(choice.native.decode())
-    if choice.native is not None:
-        return {"decision": choice.native.decode()}
-    return {"decision": choice.kind}
+        response = obj(choice.native.decode())
+        decode(wire.PermissionsRequestApprovalResponse, response)
+        return response
+    decision = choice.kind if choice.native is None else choice.native.decode()
+    if request.kind == "command":
+        decode(wire.CommandExecutionRequestApprovalResponse, {"decision": decision})
+    else:
+        decode(wire.FileChangeRequestApprovalResponse, {"decision": decision})
+    return {"decision": decision}
 
 
 def default_choice(request: ApprovalRequest) -> ApprovalChoice:
@@ -145,37 +155,27 @@ def default_choice(request: ApprovalRequest) -> ApprovalChoice:
 
 
 def questions(ref: ThreadRef, run_id: str, identity: RequestID, params: dict[str, JSONValue]) -> QuestionRequest:
-    result: list[Question] = []
-    for value in array(params["questions"]):
-        question = obj(value)
-        offered = question.get("options")
-        options = (
+    prompt = decode(wire.ToolRequestUserInputParams, params)
+    result = tuple(
+        Question(
+            question.id,
+            question.header,
+            question.question,
             None
-            if offered is None
-            else tuple(
-                QuestionOption(string(obj(option)["label"]), string(obj(option)["description"]))
-                for option in array(offered)
-            )
+            if question.options is None
+            else tuple(QuestionOption(option.label, option.description) for option in question.options),
+            question.is_other,
+            question.is_secret,
         )
-        result.append(
-            Question(
-                string(question["id"]),
-                string(question["header"]),
-                string(question["question"]),
-                options,
-                boolean(question.get("isOther", False)),
-                boolean(question.get("isSecret", False)),
-            )
-        )
+        for question in prompt.questions
+    )
     if len({q.id for q in result}) != len(result):
         raise ProtocolError("Duplicate question identities")
-    return QuestionRequest(
-        ref, run_id, str(identity), string(params["itemId"]), tuple(result), boolean(params["isBlocking"])
-    )
+    return QuestionRequest(ref, run_id, str(identity), prompt.item_id, result, prompt.is_blocking)
 
 
 def question_response(request: QuestionRequest, response: QuestionResponse) -> dict[str, JSONValue]:
-    answers: dict[str, JSONValue] = {}
+    answers: dict[str, wire.ToolRequestUserInputAnswer] = {}
     expected = {q.id: q for q in request.questions}
     for answer in response.answers:
         if answer.question_id not in expected or answer.question_id in answers:
@@ -185,7 +185,7 @@ def question_response(request: QuestionRequest, response: QuestionResponse) -> d
             offered = {option.label for option in question.options}
             if any(value not in offered for value in answer.values):
                 raise ProtocolError("Question response uses an unavailable option")
-        answers[answer.question_id] = {"answers": list(answer.values)}
+        answers[answer.question_id] = wire.ToolRequestUserInputAnswer(answers=list(answer.values))
     if set(answers) != set(expected):
         raise ProtocolError("Question response must answer exactly the requested questions")
-    return {"answers": answers}
+    return encode(wire.ToolRequestUserInputResponse(answers=answers))

@@ -3,8 +3,8 @@ name = "ohkit"
 version = "0.0.0"
 description = "A unified Python API for coding agents."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "third-party/codex/LICENSE", "third-party/codex/NOTICE"]
 requires-python = ">=3.13"
 authors = [{ name = "Converge AI Labs" }]
 classifiers = [
@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = ["websockets>=15,<16"]
+dependencies = ["pydantic>=2.12,<3", "websockets>=15,<16"]
 
 [project.urls]
 Homepage = "https://ohkit.wh1isper.top"
@@ -30,10 +30,11 @@ build-backend = "hatchling.build"
 packages = ["ohkit"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["ohkit", "pyproject.toml", "README.md", "LICENSE"]
+only-include = ["ohkit", "pyproject.toml", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "third-party"]
 
 [dependency-groups]
 dev = [
+    "datamodel-code-generator==0.83.0",
     "deptry>=0.25,<0.26",
     "mdformat==1.0.0",
     "mdformat-footnote==0.1.3",
@@ -59,6 +60,10 @@ line-length = 120
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "RUF", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pydantic copies mutable defaults; Ruff cannot infer our custom model base.
+"ohkit/backends/codex/_generated.py" = ["RUF012"]
 
 [tool.pyright]
 include = ["ohkit", "scripts", "examples"]

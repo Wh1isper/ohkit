@@ -3,6 +3,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
 from websockets.asyncio.server import serve
@@ -25,6 +26,14 @@ from ohkit import (
     UnknownOutcomeError,
 )
 from ohkit.backends.codex import Codex, CodexOptions
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def thread_response(identity):
+    response = json.loads((FIXTURES / "thread.json").read_text())
+    response["thread"]["id"] = identity
+    return response
 
 
 class Peer:
@@ -49,6 +58,10 @@ class Peer:
         await self.send({"id": call["id"], "result": result})
 
     async def notify(self, method, **params):
+        if method == "item/started":
+            params.setdefault("startedAtMs", 1)
+        elif method == "item/completed":
+            params.setdefault("completedAtMs", 2)
         await self.send({"method": method, "params": {"threadId": "thread-1", **params}})
 
     async def next(self, method):
@@ -79,6 +92,8 @@ class Peer:
         )
 
     async def request(self, method, identity=700, **params):
+        if method.endswith("/requestApproval"):
+            params.setdefault("startedAtMs", 1)
         await self.send(
             {
                 "id": identity,
@@ -98,7 +113,7 @@ class Peer:
                 self.all_calls.append(frame)
                 method = frame["method"]
                 if method == "initialize":
-                    await self.response(frame, {"userAgent": "codex/0.161.0"})
+                    await self.response(frame, json.loads((FIXTURES / "initialize.json").read_text()))
                 elif method in ("thread/start", "thread/resume", "thread/fork"):
                     if method == "thread/start":
                         self.thread_count += 1
@@ -106,7 +121,7 @@ class Peer:
                     else:
                         identity = "thread-fork" if method == "thread/fork" else frame["params"]["threadId"]
                     if not self.hold_thread:
-                        await self.response(frame, {"thread": {"id": identity, "turns": []}})
+                        await self.response(frame, thread_response(identity))
                 elif method == "turn/start":
                     self.number += 1
                     self.turn = f"turn-{self.number}"
@@ -363,11 +378,13 @@ def test_approval_choices_missing_and_failed_handlers_never_approve(handler_mode
     asyncio.run(scenario())
 
 
-def test_permissions_preserve_exact_scope_and_native_profile():
+@pytest.mark.parametrize("extra", [{}, {"glob_scan_max_depth": 2}, {"globScanMaxDepth": 3, "glob_scan_max_depth": 2}])
+def test_permissions_preserve_exact_scope_and_native_profile(extra):
     async def scenario():
         permissions = {
             "network": {"enabled": True},
             "fileSystem": {
+                **extra,
                 "write": ["/project"],
                 "entries": [{"path": {"type": "glob_pattern", "pattern": "/project/*.py"}, "access": "write"}],
             },
@@ -495,7 +512,7 @@ def test_native_terminal_before_start_ack_is_retained():
             await peer.finish()
             await backend.new_thread()  # Reader round trip processes completion.
             assert not task.done()
-            await peer.response(call, {"turn": {"id": peer.turn, "status": "inProgress"}})
+            await peer.response(call, {"turn": {"id": peer.turn, "status": "inProgress", "items": []}})
             assert (await task).outcome == "completed"
 
     asyncio.run(scenario())
@@ -570,7 +587,7 @@ def test_connection_failure_while_waiting_for_write_lock_never_dispatches(monkey
 
             monkeypatch.setattr(rpc, "send", queued_send)
             async with rpc.write_lock:
-                submission = asyncio.create_task(rpc.call("turn/start", {"threadId": "thread-1", "input": []}))
+                submission = asyncio.create_task(rpc._call("turn/start", {"threadId": "thread-1", "input": []}))
                 await entered.wait()
                 rpc.fail(ProtocolError("Connection failed while the write was queued"))
             with pytest.raises(UnknownOutcomeError):
@@ -732,7 +749,7 @@ def test_backend_close_rejects_late_thread_attachment(operation):
                 closing = asyncio.create_task(backend.close())
                 interrupt = await peer.next("turn/interrupt")
                 identity = history.ref.id if operation == "resume" else "thread-late"
-                await peer.response(call, {"thread": {"id": identity, "turns": []}})
+                await peer.response(call, thread_response(identity))
                 with pytest.raises(UnavailableError):
                     await asyncio.wait_for(attaching, 1)
                 assert not closing.done()
@@ -933,11 +950,46 @@ def test_terminal_history_drain_is_not_steering_consumption(later):
                             "text": "",
                         },
                     )
-                await peer.notify("turn/completed", turn={"id": peer.turn, "status": "completed", "error": None})
+                await peer.notify(
+                    "turn/completed", turn={"id": peer.turn, "status": "completed", "items": [], "error": None}
+                )
                 result = (await drain(run))[1]
-                assert result.outcome == "unknown" and result.failure.code == "unaccounted_steer"
-                assert result.native_status == "completed"
+                assert result.outcome == "unknown"
+                if later == "unknown_delivery":
+                    assert result.failure.code == "connection_lost"  # Unknown enum is not additive data.
+                else:
+                    assert result.failure.code == "unaccounted_steer"
+                    assert result.native_status == "completed"
             with pytest.raises(UnavailableError):
                 await thread.run("unsafe continuation")
+
+    asyncio.run(scenario())
+
+
+def test_thread_options_omit_inherited_values_on_all_history_calls():
+    async def scenario():
+        async with connected() as (peer, backend):
+            thread = await backend.new_thread()
+            assert (await peer.next("thread/start"))["params"] == {}
+            await backend.resume(thread.ref)
+            assert (await peer.next("thread/resume"))["params"] == {"threadId": thread.ref.id}
+            await backend.fork(thread.ref)
+            assert (await peer.next("thread/fork"))["params"] == {"threadId": thread.ref.id}
+
+    asyncio.run(scenario())
+
+
+def test_malformed_typed_start_response_settles_unknown_and_disables_connection():
+    async def scenario():
+        async with connected() as (peer, backend):
+            peer.hold_start = True
+            thread = await backend.new_thread()
+            task = asyncio.create_task(thread.run("work"))
+            call = await peer.next("turn/start")
+            await peer.response(call, {"turn": {"id": peer.turn, "status": "inProgress"}})  # Missing required items.
+            with pytest.raises(UnknownOutcomeError):
+                await asyncio.wait_for(task, 2)
+            with pytest.raises(UnavailableError):
+                await backend.new_thread()
 
     asyncio.run(scenario())

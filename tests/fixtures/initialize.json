@@ -1,0 +1,6 @@
+{
+  "userAgent": "controlled-test-peer",
+  "codexHome": "/fixture",
+  "platformFamily": "unix",
+  "platformOs": "linux"
+}

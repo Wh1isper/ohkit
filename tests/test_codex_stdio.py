@@ -22,6 +22,7 @@ def options(tmp_path):
         executable=str(executable),
         env=(
             ("HOME", str(tmp_path)),
+            ("OHKIT_TEST_FIXTURES", str(source.parent)),
             ("OHKIT_TEST_PID", str(tmp_path / "pid")),
             ("OHKIT_TEST_CALLS", str(tmp_path / "calls")),
         ),

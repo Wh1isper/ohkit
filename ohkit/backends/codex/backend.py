@@ -1,4 +1,4 @@
-"""Codex app-server v2 control, tested against rust-v0.161.0."""
+"""Codex app-server v2 control against the generated compatibility baseline."""
 
 # pyright: reportPrivateUsage=false
 # Adapters cooperate with private shared lifecycle hooks; these are not public API.
@@ -10,7 +10,7 @@ from types import TracebackType
 from typing import Literal
 from uuid import uuid4
 
-from ..._json import integer, native, obj, optional_string, string
+from ..._json import native, obj, string
 from ...errors import (
     BusyError,
     CleanupError,
@@ -44,48 +44,47 @@ from ...values import (
     Usage,
     UsageEvent,
 )
+from . import _generated as wire
 from ._interactions import approval, approval_response, default_choice, question_response, questions
-from ._rpc import RPC, RequestID, request_id
+from ._rpc import RPC, RequestID
 from ._transport import Stdio, WebSocket, local_scope
+from ._version import CODEX_VERSION
+from ._wire import decode, encode
 from .options import CodexOptions, CodexThreadOptions
 
 CAPABILITIES = Capabilities(steer=True, resume=True, fork=True, approvals=True, questions=True)
-_DELTA_CHANNELS: dict[str, Literal["assistant", "reasoning", "tool"]] = {
-    "item/agentMessage/delta": "assistant",
-    "item/reasoning/summaryTextDelta": "reasoning",
-    "item/reasoning/textDelta": "reasoning",
-    "item/commandExecution/outputDelta": "tool",
+type Delta = (
+    wire.AgentMessageDeltaNotification
+    | wire.ReasoningSummaryTextDeltaNotification
+    | wire.ReasoningTextDeltaNotification
+    | wire.CommandExecutionOutputDeltaNotification
+)
+_DELTA_MODELS: dict[str, tuple[type[Delta], Literal["assistant", "reasoning", "tool"]]] = {
+    "item/agentMessage/delta": (wire.AgentMessageDeltaNotification, "assistant"),
+    "item/reasoning/summaryTextDelta": (wire.ReasoningSummaryTextDeltaNotification, "reasoning"),
+    "item/reasoning/textDelta": (wire.ReasoningTextDeltaNotification, "reasoning"),
+    "item/commandExecution/outputDelta": (wire.CommandExecutionOutputDeltaNotification, "tool"),
 }
 
 
-def _input_item(value: object) -> JSONValue:
+type NativeInput = wire.TextUserInput | wire.UrlUserInput | wire.LocalImageUserInput
+
+
+def _input_item(value: object) -> NativeInput:
     if isinstance(value, Text):
-        return {"type": "text", "text": value.text, "text_elements": []}
+        return wire.TextUserInput(type="text", text=value.text, text_elements=[])
     if isinstance(value, Image):
-        return {"type": "image", "url": value.url}
+        return wire.UrlUserInput(type="image", url=value.url)
     if isinstance(value, LocalImage):
-        return {"type": "localImage", "path": value.path}
+        return wire.LocalImageUserInput(type="localImage", path=value.path)
     raise TypeError("Run input requires Text, Image, or LocalImage values")
 
 
-def _input(input: Input) -> list[JSONValue]:
+def _input(input: Input) -> list[NativeInput]:
     values = (Text(input),) if isinstance(input, str) else input
     if not values:
         raise ValueError("Run input cannot be empty")
     return [_input_item(value) for value in values]
-
-
-def _thread_params(options: CodexThreadOptions, cwd: str | None) -> dict[str, JSONValue]:
-    values: dict[str, JSONValue] = {
-        "model": options.model,
-        "modelProvider": options.model_provider,
-        "approvalPolicy": options.approval_policy,
-        "sandbox": options.sandbox,
-        "baseInstructions": options.base_instructions,
-        "developerInstructions": options.developer_instructions,
-        "cwd": cwd,
-    }
-    return {key: value for key, value in values.items() if value is not None}
 
 
 class Codex:
@@ -96,7 +95,7 @@ class Codex:
     """
 
     capabilities = CAPABILITIES
-    tested_native_version = "0.161.0"
+    tested_native_version = CODEX_VERSION
 
     def __init__(self, *, options: CodexOptions | None = None) -> None:
         self.options = options or CodexOptions()
@@ -117,12 +116,11 @@ class Codex:
         )
         self._rpc = RPC(transport, self.options.request_timeout, self._notification, self._request, self._lost)
         try:
-            await self._rpc.call(
-                "initialize",
-                {
-                    "clientInfo": {"name": "ohkit", "version": "0.0.0"},
-                    "capabilities": {"experimentalApi": True},
-                },
+            await self._rpc.initialize(
+                wire.InitializeParams(
+                    client_info=wire.ClientInfo(name="ohkit", version="0.0.0"),
+                    capabilities=wire.InitializeCapabilities(experimental_api=True),
+                )
             )
             await self._rpc.send({"method": "initialized"})
         except BaseException:
@@ -155,10 +153,10 @@ class Codex:
 
         task.add_done_callback(finished)
 
-    def _attach(self, response: dict[str, JSONValue]) -> Thread:
+    def _attach(self, response: wire.Thread) -> Thread:
         # An admitted history request may return after backend close began.
         self._connection()
-        identity = string(obj(response["thread"])["id"])
+        identity = response.id
         previous = self._threads.get(identity)
         if previous is not None and previous.thread._active is not None:
             raise ProtocolError("Native history is already owned by an active live Thread")
@@ -171,9 +169,19 @@ class Codex:
         return thread
 
     async def new_thread(self, *, cwd: str | None = None, options: CodexThreadOptions | None = None) -> Thread:
-        return self._attach(
-            await self._connection().call("thread/start", _thread_params(options or CodexThreadOptions(), cwd))
+        options = options or CodexThreadOptions()
+        response = await self._connection().thread_start(
+            wire.ThreadStartParams(
+                model=options.model,
+                model_provider=options.model_provider,
+                approval_policy=options.approval_policy,
+                sandbox=options.sandbox,
+                base_instructions=options.base_instructions,
+                developer_instructions=options.developer_instructions,
+                cwd=cwd,
+            )
         )
+        return self._attach(response.thread)
 
     def _reference(self, ref: ThreadRef) -> None:
         if ref.backend != "codex" or ref.scope != self._scope:
@@ -186,17 +194,39 @@ class Codex:
         self, ref: ThreadRef, *, cwd: str | None = None, options: CodexThreadOptions | None = None
     ) -> Thread:
         self._reference(ref)
-        params = _thread_params(options or CodexThreadOptions(), cwd)
-        params["threadId"] = ref.id
-        return self._attach(await self._connection().call("thread/resume", params))
+        options = options or CodexThreadOptions()
+        response = await self._connection().thread_resume(
+            wire.ThreadResumeParams(
+                thread_id=ref.id,
+                model=options.model,
+                model_provider=options.model_provider,
+                approval_policy=options.approval_policy,
+                sandbox=options.sandbox,
+                base_instructions=options.base_instructions,
+                developer_instructions=options.developer_instructions,
+                cwd=cwd,
+            )
+        )
+        return self._attach(response.thread)
 
     async def fork(
         self, ref: ThreadRef, *, cwd: str | None = None, options: CodexThreadOptions | None = None
     ) -> Thread:
         self._reference(ref)
-        params = _thread_params(options or CodexThreadOptions(), cwd)
-        params["threadId"] = ref.id
-        return self._attach(await self._connection().call("thread/fork", params))
+        options = options or CodexThreadOptions()
+        response = await self._connection().thread_fork(
+            wire.ThreadForkParams(
+                thread_id=ref.id,
+                model=options.model,
+                model_provider=options.model_provider,
+                approval_policy=options.approval_policy,
+                sandbox=options.sandbox,
+                base_instructions=options.base_instructions,
+                developer_instructions=options.developer_instructions,
+                cwd=cwd,
+            )
+        )
+        return self._attach(response.thread)
 
     def _notification(self, method: str, params: dict[str, JSONValue]) -> None:
         identity = params.get("threadId")
@@ -277,7 +307,7 @@ class _RunDriver:
         self.handlers = handlers
         self.rpc = binding.backend._connection()
         self.turn_id: str | None = None
-        self.terminal: dict[str, JSONValue] | None = None
+        self.terminal: wire.Turn | None = None
         self.native_failure: Failure | None = None
         self.controls = 1  # Initial submission is owned before any notification.
         self.done = asyncio.Event()
@@ -305,19 +335,17 @@ class _RunDriver:
 
     async def start(self, input: Input) -> None:
         try:
-            content = _input(input)
-            response = await self.rpc.call(
-                "turn/start",
-                {
-                    "threadId": self.binding.identity,
-                    "input": content,
-                    "clientUserMessageId": "input_" + uuid4().hex,
-                },
+            response = await self.rpc.turn_start(
+                wire.TurnStartParams(
+                    thread_id=self.binding.identity,
+                    input=[item for item in _input(input)],
+                    client_user_message_id="input_" + uuid4().hex,
+                )
             )
-            turn = obj(response["turn"])
-            self._bind_turn(string(turn["id"]))
+            turn = response.turn
+            self._bind_turn(turn.id)
             self.run._emit(LifecycleEvent(self.run.thread, self.run.id, "started"))
-            status = string(turn["status"])
+            status = turn.status
             if status != "inProgress" and self.terminal is None:
                 self._terminal(turn)
         except (NativeRejectedError, ValueError, TypeError):
@@ -351,16 +379,15 @@ class _RunDriver:
         identity = "input_" + uuid4().hex
         self.controls += 1
         try:
-            response = await self.rpc.call(
-                "turn/steer",
-                {
-                    "threadId": self.binding.identity,
-                    "expectedTurnId": turn_id,
-                    "input": content,
-                    "clientUserMessageId": identity,
-                },
+            response = await self.rpc.turn_steer(
+                wire.TurnSteerParams(
+                    thread_id=self.binding.identity,
+                    expected_turn_id=turn_id,
+                    input=[item for item in content],
+                    client_user_message_id=identity,
+                )
             )
-            if string(response["turnId"]) != turn_id:
+            if response.turn_id != turn_id:
                 raise ProtocolError("Steer accepted by an unexpected native Turn")
             self.steered.add(identity)
         except NativeRejectedError:
@@ -398,7 +425,10 @@ class _RunDriver:
             if self.terminal is not None or self.unknown or self.rejected:
                 return
             self.run._emit(LifecycleEvent(self.run.thread, self.run.id, "cancelling"))
-            await self.rpc.call("turn/interrupt", {"threadId": self.binding.identity, "turnId": self.turn_id})
+            assert self.turn_id is not None
+            await self.rpc.turn_interrupt(
+                wire.TurnInterruptParams(thread_id=self.binding.identity, turn_id=self.turn_id)
+            )
         except NativeRejectedError:
             # Completion can win. A rejection is not termination evidence.
             pass
@@ -419,14 +449,13 @@ class _RunDriver:
         self.changed.set()
         self._maybe_finalize()
 
-    def _terminal(self, turn: dict[str, JSONValue]) -> None:
-        status = string(turn["status"])
+    def _terminal(self, turn: wire.Turn) -> None:
+        status = turn.status
         if status not in ("completed", "failed", "interrupted"):
             raise ProtocolError("Unknown native terminal status")
         # Validate result fields on the reader path, where malformed evidence
         # fails the connection and settles Runs as unknown, never a stuck drain.
-        error = turn.get("error")
-        failure = None if error is None else Failure("native_execution_failed", string(obj(error)["message"]))
+        failure = None if turn.error is None else Failure("native_execution_failed", turn.error.message)
         if self.terminal is None:
             self.native_failure = failure
             self.terminal = turn
@@ -436,11 +465,14 @@ class _RunDriver:
         if self.done.is_set():
             return
         if method == "serverRequest/resolved":
-            self._withdraw(request_id(params["requestId"]))
+            self._withdraw(decode(wire.ServerRequestResolvedNotification, params).request_id)
             return
         if method in ("turn/started", "turn/completed"):
-            turn = obj(params["turn"])
-            identity = string(turn["id"])
+            notification = decode(
+                wire.TurnStartedNotification if method == "turn/started" else wire.TurnCompletedNotification, params
+            )
+            turn = notification.turn
+            identity = turn.id
             if method == "turn/started" and self.turn_id is None:
                 self._bind_turn(identity)
             if identity != self.turn_id:
@@ -451,46 +483,52 @@ class _RunDriver:
         # Only explicitly correlated foreground observations belong to this Run.
         if params.get("turnId") != self.turn_id or self.turn_id is None or self.terminal is not None:
             return
-        channel = _DELTA_CHANNELS.get(method)
-        if channel is not None:
-            self.run._emit(
-                ContentEvent(self.run.thread, self.run.id, string(params["itemId"]), string(params["delta"]), channel)
-            )
-        elif method in ("item/started", "item/completed"):
-            self._observe_item(obj(params["item"]), "started" if method == "item/started" else "completed")
+        delta_model = _DELTA_MODELS.get(method)
+        if delta_model is not None:
+            model, channel = delta_model
+            delta = decode(model, params)
+            self.run._emit(ContentEvent(self.run.thread, self.run.id, delta.item_id, delta.delta, channel))
+        elif method == "item/started":
+            self._observe_item(decode(wire.ItemStartedNotification, params), "started", obj(params["item"]))
+        elif method == "item/completed":
+            self._observe_item(decode(wire.ItemCompletedNotification, params), "completed", obj(params["item"]))
         elif method == "thread/tokenUsage/updated":
             # last = current native Turn, total = conversation lifetime.
-            last = obj(obj(params["tokenUsage"])["last"])
+            last = decode(wire.ThreadTokenUsageUpdatedNotification, params).token_usage.last
             self.usage = Usage(
-                input_tokens=integer(last["inputTokens"]),
-                output_tokens=integer(last["outputTokens"]),
-                cached_input_tokens=integer(last["cachedInputTokens"]),
-                reasoning_output_tokens=integer(last["reasoningOutputTokens"]),
-                total_tokens=integer(last["totalTokens"]),
+                input_tokens=last.input_tokens,
+                output_tokens=last.output_tokens,
+                cached_input_tokens=last.cached_input_tokens,
+                reasoning_output_tokens=last.reasoning_output_tokens,
+                total_tokens=last.total_tokens,
             )
             self.run._emit(UsageEvent(self.run.thread, self.run.id, self.usage))
         else:
             self.run._emit(NativeEvent(self.run.thread, self.run.id, method, native(params)))
 
-    def _observe_item(self, item: dict[str, JSONValue], phase: Literal["started", "completed"]) -> None:
-        kind = string(item["type"])
-        identity = string(item["id"])
-        if kind == "userMessage":
-            client_id = optional_string(item.get("clientId"))
-            if client_id is not None:
-                self.recorded.add(client_id)
-        elif kind in ("agentMessage", "reasoning"):
-            if item.get("delivery") is None:
+    def _observe_item(
+        self,
+        notification: wire.ItemStartedNotification | wire.ItemCompletedNotification,
+        phase: Literal["started", "completed"],
+        raw: dict[str, JSONValue],
+    ) -> None:
+        item = notification.item
+        kind, identity = item.type, item.id
+        if isinstance(item, wire.UserMessageThreadItem):
+            if item.client_id is not None:
+                self.recorded.add(item.client_id)
+        elif isinstance(item, (wire.AgentMessageThreadItem, wire.ReasoningThreadItem)):
+            if isinstance(item, wire.ReasoningThreadItem) or item.delivery is None:
                 if phase == "started" and identity not in self.model_items:
                     # on_task_finished also records unsampled pending prompts.
                     # A new foreground model item after prompt recording is
                     # required; history/clientId alone is not consumption.
                     self.consumed.update(self.recorded)
-                if kind == "agentMessage" and phase == "completed":
-                    self.output[identity] = string(item["text"])
+                if isinstance(item, wire.AgentMessageThreadItem) and phase == "completed":
+                    self.output[identity] = item.text
             self.model_items.add(identity)
         elif kind not in ("plan", "hookPrompt"):
-            self.run._emit(ToolEvent(self.run.thread, self.run.id, identity, kind, phase, native(item)))
+            self.run._emit(ToolEvent(self.run.thread, self.run.id, identity, kind, phase, native(raw)))
 
     def request(self, identity: RequestID, method: str, params: dict[str, JSONValue]) -> None:
         if identity in self.interactions:
@@ -615,7 +653,7 @@ class _RunDriver:
                 self.binding.thread._available = False
                 self.cleanup_error = CleanupError("Interaction tasks did not settle before the cleanup deadline")
                 self.unknown = True
-        status = None if self.terminal is None else string(self.terminal["status"])
+        status = None if self.terminal is None else self.terminal.status
         outcome: Outcome = "unknown"
         if not self.unknown and status is not None:
             if status == "completed":
@@ -643,7 +681,7 @@ class _RunDriver:
             failure=self.failure,
             native_turn_id=self.turn_id,
             native_status=status,
-            native=None if self.terminal is None else native(self.terminal),
+            native=None if self.terminal is None else native(encode(self.terminal)),
         )
         if self.cleanup_error is not None:
             self.cleanup_error.result = result

@@ -68,6 +68,12 @@ Sandbox requirements must be enforced or rejected. Selecting an explicit unsandb
 
 Workspace does not relocate all Codex state. Native history, credentials, app-server configuration, and unbridged native paths remain under their own owners. The [common binding lifetime](../workspace/00-overview.md#binding-and-lifetime) governs borrowed providers and owned handles.
 
+## Control Protocol Compatibility
+
+The implemented control adapter derives private typed wire models from a pinned official app-server schema export. Upstream owns fields and aliases; the adapter owns method/response association and semantic projection into shared values. Generated native types are not public ohkit API. Required fields, nullable values, and omission remain distinct. Known field types are validated without coercion; additive native fields are preserved. Invalid known shapes fail explicitly, and possible dispatch without usable acknowledgement retains unknown-outcome semantics.
+
+A schema-compatible message is not proof of execution completion, steering consumption, or an authorized decision. Those guarantees remain governed by execution and interaction contracts. Reproducible generation, controlled protocol tests, and exact-version native tests provide separate evidence. Automated upstream version/schema comparison reports drift for review; it does not expand the tested range or upgrade the baseline automatically. [Protocol maintenance](../../docs/codex-protocol.md) owns the contributor procedure.
+
 ## Upstream Basis
 
 The mapping is grounded in Codex `rust-v0.161.0` and remains version-sensitive:

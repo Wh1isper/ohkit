@@ -72,6 +72,8 @@ OHKIT_TEST_NATIVE=1 OHKIT_CODEX_BINARY=/path/to/codex uv run --locked pytest tes
 
 The Linux x86_64 fixture downloads the official pinned release into a test temporary directory and checks its SHA-256 before extraction. Normal `make check-all` skips these executable/network-download tests. No authenticated live-provider smoke test is implied by deterministic validation.
 
+Wire shapes are generated from the pinned official schema into private Pydantic v2 models. Structural decoding is strict and errors do not echo native validation payloads. Unknown fields survive round trips; unknown known-field enum values fail explicitly. [Protocol maintenance](codex-protocol.md) owns regeneration, the daily upstream drift Action, and the reviewed upgrade procedure.
+
 ## Steering evidence
 
 The adapter sends a unique `clientUserMessageId` on each steering request and first records the same `clientId` on the current Turn's native user-message item. Recording alone is insufficient: only a new foreground `agentMessage` or `reasoning` **item start**, after that prompt item, establishes subsequent model work. Deltas, late completion of an older item, repeated starts of an already observed item, async-delivery messages, and another Turn's events are not consumption evidence. The pinned [delivery enum](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/protocol/src/items.rs#L130-L135) has only `async`; only absent/null delivery is treated as foreground, not an unknown future delivery value. The adapter also waits for steering acknowledgement and native terminal evidence. Non-interrupted completion without this evidence is unknown and disables the owner.
