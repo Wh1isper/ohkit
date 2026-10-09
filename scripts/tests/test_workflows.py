@@ -75,3 +75,21 @@ def test_docs_domain_configuration_is_manual_and_main_only():
     assert job["environment"] == "docs"
     assert job["steps"][0]["with"]["persist-credentials"] is False
     assert job["steps"][-1]["run"] == "python scripts/configure_docs_domain.py"
+
+
+def test_codex_maintenance_is_read_only_scheduled_and_preserves_reports():
+    maintenance = workflow("codex-upstream.yml")
+    assert maintenance[True] == {"schedule": [{"cron": "23 7 * * *"}], "workflow_dispatch": None}
+    assert maintenance["permissions"] == {"contents": "read"}
+    job = maintenance["jobs"]["check"]
+    assert job["timeout-minutes"] == 20
+    assert "environment" not in job
+    assert job["steps"][0]["with"]["persist-credentials"] is False
+    check = next(step for step in job["steps"] if step.get("run") == "make codex-upstream-check")
+    assert not check.get("continue-on-error")
+    artifact = job["steps"][-1]
+    assert artifact["if"] == "always()"
+    assert artifact["with"]["path"] == "test-results/codex-upstream/"
+    native = workflow("ci.yml")["jobs"]["codex-native"]
+    assert any(step.get("run") == "make codex-native-test" for step in native["steps"])
+    assert "codex-check" in (ROOT / "Makefile").read_text().split("check:", 1)[-1]

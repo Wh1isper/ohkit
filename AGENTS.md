@@ -1,6 +1,6 @@
 # Repository Guide
 
-ohkit is an independent, pure Python programming interface for agent harnesses. The specifications define its target architecture; the bootstrap has no execution API or backend implementations.
+ohkit is an independent, pure Python programming interface for agent harnesses. Typed async execution and Codex app-server control are implemented; Workspace I/O and other backend adapters remain specification-only. Read the owning implementation and compatibility documentation rather than treating all accepted target contracts as available features.
 
 ## Sources of Truth
 

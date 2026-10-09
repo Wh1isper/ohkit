@@ -5,6 +5,8 @@
 | Surface                         | Owner and purpose                                       |
 | ------------------------------- | ------------------------------------------------------- |
 | `ohkit/`                        | Independently installable pure Python package           |
+| `protocol/`                     | Pinned upstream schema snapshots and provenance         |
+| `third-party/`                  | Upstream licenses and notices for derived portions      |
 | `tests/`                        | Package behavior tests                                  |
 | `scripts/` and `scripts/tests/` | Repository and release tooling and tests                |
 | `.github/`                      | CI, release workflows, and contribution automation      |
@@ -24,7 +26,7 @@ The documentation workflow builds and validates pull-request content without dep
 
 ## Package Boundary
 
-Repository, distribution, and import names are `ohkit`. Python 3.13 is the minimum version. The bootstrap has no runtime dependencies. Wheels and source distributions contain package code, metadata, README, and license, not repository automation, Skills, or credentials. The source distribution can rebuild the wheel without Node.js or Rust. Installed package metadata owns `ohkit.__version__`.
+Repository, distribution, and import names are `ohkit`. Python 3.13 is the minimum version. WebSocket transport support is included in the default installation through the `websockets` runtime dependency. Private Codex wire models use the Pydantic runtime dependency; committed models require no generator at build or import time. Backend SDKs may use optional extras; shared values and execution remain independent of backend SDKs. Wheels and source distributions contain package code, metadata, README, and licenses/notices, not repository automation, Skills, or credentials. The source distribution can rebuild the wheel without Node.js or Rust. Installed package metadata owns `ohkit.__version__`.
 
 ## Release Boundary
 

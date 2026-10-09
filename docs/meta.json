@@ -2,8 +2,11 @@
   "pages": [
     "index",
     "getting-started",
+    "execution",
+    "codex",
     "examples",
     "---Maintainers---",
+    "codex-protocol",
     "documentation",
     "releasing"
   ]

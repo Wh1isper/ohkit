@@ -1,32 +1,68 @@
 ---
 title: Getting started
-description: Install the pre-alpha bootstrap and check its version.
+description: Run a configured Codex app-server through typed asynchronous execution.
 ---
 
-## Requirements
+## Requirements and availability
 
-Use Python 3.13 or newer. The Python distribution has no runtime dependencies. Documentation tools are separate development dependencies.
+Use Python 3.13 or newer. This source checkout implements Thread/Run execution and Codex control. Earlier published bootstrap releases expose version metadata only; install the implementation from this checkout until a release containing it is available.
 
-## Install the bootstrap
+Codex must be installed separately and configured with access to its native model provider. Use the tested native version listed in [Codex compatibility](codex.md#compatibility-and-validation). The default installation includes the `websockets` dependency for WebSocket control; no extra is required. Documentation tools are separate developer dependencies.
 
-The current release is a pre-release. Include `--pre` when installing it:
+## Install from source
 
 ```bash
-python -m pip install --pre ohkit
+python -m pip install .
 ```
 
-Check the installed version:
+## Result-only execution
 
 ```python
-import ohkit
+import asyncio
 
-print(ohkit.__version__)
+from ohkit.backends.codex import Codex
+
+
+async def main() -> None:
+    async with Codex() as backend:
+        thread = await backend.new_thread(cwd="/path/to/project")
+        result = await thread.run("Explain the project without changing files.")
+        print(result.outcome)
+        print(result.output)
+
+
+asyncio.run(main())
 ```
 
-This verifies installation only. The package does not yet run Codex, ACP agents, or Claude.
+`Codex()` starts and owns an app-server over stdio. `cwd` refers to the native app-server host, not a caller-supplied Workspace. The native harness owns tool execution and sandbox policy. Missing approval handlers select a native non-approval choice; they do not grant permission.
 
-## Follow the design
+A completed result means native execution ended normally, not that the task achieved its goal. Check `result.outcome` before treating `result.output` as a successful answer. Usage is `None` when unavailable, not zero.
 
-Read the [application-hosted executor example](examples/application-hosted-executor.md) for the intended integration boundary. It is a conceptual example, not code that can run against the bootstrap.
+## Streaming and continuation
 
-The [specifications](https://github.com/Wh1isper/ohkit/tree/main/spec) define the accepted execution and Workspace contracts. Executable examples and backend compatibility ranges will accompany their implementations.
+```python
+from ohkit import ContentEvent
+
+# Inside an async function with an entered backend:
+thread = await backend.new_thread(cwd="/path/to/project")
+async with thread.stream("Explain the main entry point.") as run:
+    async for event in run:
+        if isinstance(event, ContentEvent) and event.channel == "assistant":
+            print(event.text, end="", flush=True)
+    result = await run.result()
+
+reference = thread.ref
+resumed = await backend.resume(reference)
+follow_up = await resumed.run("Summarize your explanation.")
+```
+
+Consume a Run's stream once before calling `result()`. For result-only work, `thread.run()` owns the same driver's drainage. Leaving a stream early requests interruption and settles cleanup; it does not detach the foreground work.
+
+`ThreadRef` identifies native history and its storage scope. It contains no credentials and does not restore live processes, pending approvals, or an interrupted Python Run. Reopening the same history in this backend replaces its idle live owner; the old object becomes unavailable.
+
+## Next steps
+
+- [Execution](execution.md): ownership, steering, cancellation, events, and handlers.
+- [Codex](codex.md): options, native policy, transport lifetime, and compatibility evidence.
+- [Runnable example](https://github.com/Wh1isper/ohkit/blob/main/examples/codex.py): streaming with an explicit non-approval handler and history continuation.
+- [Application-hosted executor](examples/application-hosted-executor.md): conceptual future Workspace integration, not an implemented executor bridge.
