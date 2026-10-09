@@ -43,6 +43,6 @@ Read the architecture first, then the contracts relevant to the integration:
 
 ## Specification and Implementation
 
-These documents define the target contracts. A specification is not an implementation or a backend-support claim. The bootstrap package still exports only `ohkit.__version__`; no execution API or backend is shipped yet. Python examples illustrate the intended interaction shape rather than an available import surface or an exhaustive signature listing.
+These documents define the accepted contracts, including integration boundaries not yet implemented. The package implements the shared execution API and Codex app-server control; Workspace, the Codex executor bridge, ACP, and Claude remain design targets. A specification alone is not a backend-support claim. User documentation and compatibility tests identify available imports and verified native behavior; conceptual examples here are not exhaustive signature listings.
 
 On the default branch, `spec/` records accepted design. Changes on a pull-request branch remain subject to review. Detailed API signatures and native compatibility tests accompany implementation; they must preserve these ownership and lifecycle boundaries.

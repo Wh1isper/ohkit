@@ -9,6 +9,8 @@ const read = (path) =>
 const routes = [
   "",
   "getting-started/",
+  "execution/",
+  "codex/",
   "examples/application-hosted-executor/",
   "documentation/",
   "releasing/",
@@ -36,9 +38,13 @@ test("search index is exported with documentation content", () => {
   assert.match(text, /Workspace/);
 });
 
-test("bootstrap limitations remain visible", () => {
+test("implemented control and unimplemented Workspace boundaries remain visible", () => {
   assert.match(read("index.html"), /version metadata only/);
-  assert.match(read("getting-started/index.html"), /does not yet run Codex/);
+  assert.match(read("getting-started/index.html"), /Earlier published bootstrap releases/);
+  assert.match(read("getting-started/index.html"), /from this checkout/);
+  assert.match(read("codex/index.html"), /0\.161\.0/);
+  assert.match(read("codex/index.html"), /does not supply a Workspace or executor bridge/);
+  assert.match(read("execution/index.html"), /UnknownOutcomeError|unknown result/);
   const example = read("examples/application-hosted-executor/index.html");
   assert.match(example, /Design example, not a shipped API/);
   assert.match(example, /View Mermaid source/);

@@ -16,6 +16,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+codex-websocket = ["websockets>=15,<16"]
+
 [project.urls]
 Homepage = "https://ohkit.wh1isper.top"
 Documentation = "https://ohkit.wh1isper.top"
@@ -47,6 +50,7 @@ dev = [
     "pytest-xdist>=3.8,<4",
     "pyyaml>=6,<7",
     "ruff>=0.16,<0.17",
+    "websockets>=15,<16",
 ]
 
 [tool.uv]
@@ -61,7 +65,8 @@ select = ["B", "E", "F", "I", "RUF", "UP"]
 ignore = ["E501"]
 
 [tool.pyright]
-include = ["ohkit", "scripts"]
+include = ["ohkit", "scripts", "examples"]
+strict = ["ohkit", "examples"]
 exclude = ["**/tests", "**/__pycache__", ".venv"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"

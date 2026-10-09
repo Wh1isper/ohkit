@@ -18,6 +18,8 @@ def check_wheel(path: Path, version: str) -> None:
         prefix = f"ohkit-{version}.dist-info/"
         assert "ohkit/py.typed" in names
         assert "ohkit/__init__.py" in names
+        assert "ohkit/execution.py" in names
+        assert "ohkit/backends/codex/backend.py" in names
         assert prefix + "licenses/LICENSE" in names
         assert all(name.startswith(("ohkit/", prefix)) for name in names), names
         metadata = email.message_from_bytes(archive.read(prefix + "METADATA"))
@@ -28,7 +30,11 @@ def check_wheel(path: Path, version: str) -> None:
         license_text = archive.read(prefix + "licenses/LICENSE").decode()
         assert license_text.startswith("MIT License\n")
         assert "Copyright (c) 2026 Converge AI" in license_text
-        assert not metadata.get_all("Requires-Dist")
+        requirements = metadata.get_all("Requires-Dist", [])
+        assert requirements and all(
+            "extra == 'codex-websocket'" in item or 'extra == "codex-websocket"' in item for item in requirements
+        )
+        assert not any("a13n" in item or "pydantic" in item for item in requirements)
         assert "Root-Is-Purelib: true" in archive.read(prefix + "WHEEL").decode()
 
 
@@ -73,12 +79,42 @@ def main() -> None:
                 str(interpreter),
                 "-I",
                 "-c",
-                f"import ohkit; assert ohkit.__version__ == {version!r}; print(ohkit.__version__)",
+                f"""import asyncio, importlib.util, ohkit
+from ohkit import Thread, Run, NativeData, UnavailableError
+from ohkit.backends.codex import Codex, CodexOptions
+assert ohkit.__version__ == {version!r}
+assert importlib.util.find_spec('websockets') is None
+assert Codex().capabilities.steer
+assert NativeData('codex', '{{"ok":true}}').decode() == {{'ok': True}}
+async def missing_extra():
+    try:
+        async with Codex(options=CodexOptions(websocket_url='ws://127.0.0.1:1', history_scope='test')):
+            raise AssertionError('Optional dependency unexpectedly available')
+    except UnavailableError as error:
+        assert 'codex-websocket' in str(error)
+asyncio.run(missing_extra())
+print(ohkit.__version__)
+""",
             ],
             check=True,
             cwd=work,
         )
-    print(f"Validated ohkit {version}: wheel, sdist rebuild, and isolated import")
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(interpreter), str(wheel) + "[codex-websocket]"],
+            check=True,
+            cwd=work,
+        )
+        subprocess.run(
+            [
+                str(interpreter),
+                "-I",
+                "-c",
+                "from ohkit.backends.codex import Codex; from websockets.asyncio.client import connect; assert callable(connect)",
+            ],
+            check=True,
+            cwd=work,
+        )
+    print(f"Validated ohkit {version}: wheel, sdist rebuild, isolated core and optional transport installs")
 
 
 if __name__ == "__main__":

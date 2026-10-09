@@ -10,5 +10,10 @@ def test_version_matches_installed_distribution() -> None:
 
 def test_distribution_is_independent_and_typed() -> None:
     assert metadata("ohkit")["Name"] == "ohkit"
-    assert metadata("ohkit").get_all("Requires-Dist", []) == []
+    requirements = metadata("ohkit").get_all("Requires-Dist", [])
+    assert requirements and all(
+        "extra == 'codex-websocket'" in requirement or 'extra == "codex-websocket"' in requirement
+        for requirement in requirements
+    )
+    assert not any("a13n" in requirement or "pydantic" in requirement for requirement in requirements)
     assert files("ohkit").joinpath("py.typed").is_file()

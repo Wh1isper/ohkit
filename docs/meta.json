@@ -2,6 +2,8 @@
   "pages": [
     "index",
     "getting-started",
+    "execution",
+    "codex",
     "examples",
     "---Maintainers---",
     "documentation",

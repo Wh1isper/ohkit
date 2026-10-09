@@ -1,10 +1,92 @@
-"""A unified Python API for coding agents.
-
-This pre-alpha bootstrap exposes package metadata only. Agent backends and
-execution APIs are not implemented yet.
-"""
+"""Typed asynchronous execution for native agent harnesses."""
 
 from importlib.metadata import version
 
-__all__ = ["__version__"]
+from .errors import (
+    BusyError,
+    CleanupError,
+    InactiveRunError,
+    NativeRejectedError,
+    ObservationOverflowError,
+    OhkitError,
+    ProtocolError,
+    UnavailableError,
+    UndrainedStreamError,
+    UnknownOutcomeError,
+    UnsupportedError,
+)
+from .execution import Run, Thread
+from .values import (
+    Answer,
+    ApprovalChoice,
+    ApprovalRequest,
+    Capabilities,
+    ContentEvent,
+    Event,
+    Failure,
+    Handlers,
+    Image,
+    Input,
+    InteractionEvent,
+    JSONValue,
+    LifecycleEvent,
+    LocalImage,
+    NativeData,
+    NativeEvent,
+    Outcome,
+    Question,
+    QuestionOption,
+    QuestionRequest,
+    QuestionResponse,
+    Result,
+    Text,
+    ThreadRef,
+    ToolEvent,
+    Usage,
+    UsageEvent,
+)
+
 __version__ = version("ohkit")
+__all__ = [
+    "Answer",
+    "ApprovalChoice",
+    "ApprovalRequest",
+    "BusyError",
+    "Capabilities",
+    "CleanupError",
+    "ContentEvent",
+    "Event",
+    "Failure",
+    "Handlers",
+    "Image",
+    "InactiveRunError",
+    "Input",
+    "InteractionEvent",
+    "JSONValue",
+    "LifecycleEvent",
+    "LocalImage",
+    "NativeData",
+    "NativeEvent",
+    "NativeRejectedError",
+    "ObservationOverflowError",
+    "OhkitError",
+    "Outcome",
+    "ProtocolError",
+    "Question",
+    "QuestionOption",
+    "QuestionRequest",
+    "QuestionResponse",
+    "Result",
+    "Run",
+    "Text",
+    "Thread",
+    "ThreadRef",
+    "ToolEvent",
+    "UnavailableError",
+    "UndrainedStreamError",
+    "UnknownOutcomeError",
+    "UnsupportedError",
+    "Usage",
+    "UsageEvent",
+    "__version__",
+]
