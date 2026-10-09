@@ -1,13 +1,22 @@
 ---
 title: Application-hosted executor
-description: A conceptual integration for hosting multiple project Workspaces behind one WebSocket service.
+description: Run an authenticated Codex executor and route project connections to borrowed Workspaces.
 ---
 
-**Design example, not a shipped API.** The bridge function, endpoint type, and application helpers below are illustrative. The current package does not export them. This page preserves the intended integration for implementation and future runnable documentation.
+## Run the example
+
+The checkout includes [`examples/hosted_workspace.py`](https://github.com/Wh1isper/ohkit/blob/main/examples/hosted_workspace.py), an executable authenticated loopback host. Install the checkout and configure native Codex first, then run:
+
+```bash
+uv run python -m examples.hosted_workspace /trusted/project \
+  --prompt "Read AGENTS.md if present, then summarize the project."
+```
+
+This invokes your configured native model provider and may incur provider charges. The example chooses an ephemeral loopback port and token, requires the bearer token before accepting the WebSocket, and supplies the token to `CodexExecutor`. It closes native control before closing the application-owned server. It deliberately uses `danger-full-access` and `approval_policy="never"`: **only run it with trusted prompts and peers.** The reference provider has full host-account authority; a project folder is not a sandbox.
 
 ## One service, many projects
 
-An application hosts a WebSocket server. Each project route selects an authorized Workspace. An ohkit bridge handles the executor protocol on each accepted connection. The application does not parse native file/process requests or construct process-output notifications.
+An application hosts a WebSocket server. Each exact project route selects a Workspace and its authorization credential. ohkit handles native file/process requests, responses, and output notifications; it does not own the listener or a project registry.
 
 ```mermaid
 flowchart TD
@@ -22,74 +31,43 @@ flowchart TD
     WB --> PB[Project B<br/>files and processes]
 ```
 
-A project endpoint is a logical route, not a dedicated server process. The control client and executor service can be deployed separately.
-
-## Bridge boundary
-
-The proposed entry point consumes complete protocol text messages and sends responses and asynchronous notifications. It does not create a listener or depend on a particular Web framework.
+The example's `ExecutorHost` can host more than one route:
 
 ```python
-# Conceptual signature; Workspace and this function are not shipped yet.
-from collections.abc import AsyncIterable, Awaitable, Callable
+from examples.hosted_workspace import ExecutorHost
+from websockets.asyncio.server import serve
 
-
-async def serve_codex_executor(
-    workspace: Workspace,
-    *,
-    messages: AsyncIterable[str],
-    send: Callable[[str], Awaitable[None]],
-) -> None: ...
-```
-
-Each invocation owns its protocol state and the file/process handles it creates. The bridge coordinates replies and asynchronous output; a request-to-response function alone is insufficient.
-
-## Application route
-
-This ASGI-style sketch uses application-owned authentication, authorization, and Workspace acquisition. `app`, `WebSocket`, and the helper functions stand for the application's framework and services, not ohkit exports.
-
-```python
-# Conceptual application code, not an executable tutorial.
-@app.websocket("/projects/{project_id}/exec")
-async def project_executor(
-    websocket: WebSocket,
-    project_id: str,
-) -> None:
-    principal = await authenticate(websocket)
-    await authorize_project(principal, project_id)
-
-    async with acquire_workspace(project_id) as workspace:
-        await websocket.accept()
-        await serve_codex_executor(
-            workspace,
-            messages=websocket.iter_text(),
-            send=websocket.send_text,
-        )
-```
-
-The transport adapter reports disconnection through iterator completion or an exception. The bridge settles its owned resources before the Workspace acquisition context exits. The application handles WebSocket closure and rejection behavior for its framework.
-
-`acquire_workspace()` may borrow a long-lived provider or acquire one for this binding. A closing connection must not destroy a shared project provider or another connection's processes.
-
-## Control-side endpoint
-
-The controller only needs the executor address and connection credentials. It need not have the execution service's Python Workspace object.
-
-```python
-# Conceptual configuration; project_token comes from application secret storage.
-executor = CodexExecutorEndpoint(
-    url="wss://executor.example.com/projects/a/exec",
-    bearer_token=project_token,
+# Application-supplied Workspace objects and secrets, not ohkit registrations.
+host = ExecutorHost(
+    {
+        "/projects/a/exec": (token_a, workspace_a),
+        "/projects/b/exec": (token_b, workspace_b),
+    }
 )
+async with serve(host.handle, "127.0.0.1", 4501, process_request=host.authorize):
+    await application_shutdown.wait()
 ```
 
-The Codex backend registers the supplied endpoint and selects it for the native conversation. The application supplies an address reachable from app-server, which may differ from the listener's bind address. TLS, proxies, tunnels, and project authorization belong to the application deployment.
+`examples` is checkout code, not an installed ohkit module. Adapt authentication to your application. Distinct routes are not tenant isolation: providers enforce actual file/process authority and coordination of concurrent writes. Deploy TLS and network controls for connections beyond trusted loopback.
 
-## Resource and authority boundaries
+## Framework-independent bridge
 
-- Each connection has independent protocol state and owned handles, even when it borrows the same Workspace as another connection.
-- Connection closure cleans up that connection's resources. The initial bridge does not promise retained handles or native executor-session resumption across disconnection.
-- An unknown write or process-launch outcome is not automatically replayed.
-- A project URL or default cwd does not isolate a process. The provider enforces file and process authority, including access outside the project's folder.
-- A local convenience listener can use this same bridge. Remote hosting does not require a second implementation.
+Only complete text messages and an async send callback cross the bridge boundary:
 
-See the [Codex backend contract](https://github.com/Wh1isper/ohkit/blob/main/spec/backends/01-codex.md) and [Workspace lifetime](https://github.com/Wh1isper/ohkit/blob/main/spec/workspace/00-overview.md#binding-and-lifetime) for the owning specifications.
+```python
+from ohkit.backends.codex import CodexExecBridge
+
+# After application authentication and project authorization:
+bridge = CodexExecBridge(workspace)
+await bridge.serve(websocket.iter_text(), websocket.send_text)
+```
+
+Here `websocket` is the application's framework object. The executable example uses `websockets` instead, validates text frames, and translates its iterator/connection methods. Disconnection must end or raise from the incoming iterator. `serve` settles connection-owned resources before returning or raising; the host must not dispose of the borrowed provider earlier. Surface cleanup failures rather than catching every exception as normal disconnection.
+
+The control client needs only `CodexExecutor(url, bearer_token=...)` and the target cwd; it need not share Python memory with the Workspace host. The advertised URL must be reachable from app-server and may differ from the listener bind address. Your application owns proxy/tunnel arrangements.
+
+## Supported lifetime
+
+Each connection has independent protocol state and handles. Shared Workspaces and listeners remain application-owned. A Run ending does not imply all executor handles have closed, and closing a control WebSocket does not stop a borrowed app-server or its registered executor. Keep hosting alive for the native execution lifetime.
+
+External execution currently supports new Threads and subsequent Runs on those live Threads, not external history resume/fork or executor-session recovery. Use a dedicated app-server rather than mixing external registration with default-environment consumers. See [Workspace binding and limits](../workspace.md#codex-binding) for the exact restriction, provider contract, and unsandboxed authority boundary.

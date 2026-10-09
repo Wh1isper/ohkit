@@ -5,14 +5,15 @@ description: An independent Python programming interface for agent harnesses.
 
 ohkit is an independent Python programming interface for agent harnesses. Its design separates conversation continuity, foreground work, and the file and process operations used by a native agent.
 
-**Pre-alpha implementation:** this source checkout implements typed asynchronous Thread/Run execution and Codex app-server control. Earlier published bootstrap releases expose version metadata only. Workspace I/O, executor bridges, ACP, and Claude adapters remain design contracts, not available APIs. Conceptual examples are explicitly labeled.
+**Pre-alpha implementation:** this source checkout implements typed asynchronous Thread/Run execution and Codex app-server control. Earlier published bootstrap releases expose version metadata only. Typed Workspace I/O and an application-hosted Codex executor are also available for new Threads in explicitly unsandboxed mode. ACP and Claude adapters remain design contracts, not available APIs.
 
 ## Start here
 
 - [Getting started](getting-started.md): install from source and run a configured Codex backend.
 - [Execution](execution.md): streams, terminal results, active control, and live decisions.
 - [Codex](codex.md): native options, transport ownership, and tested compatibility.
-- [Application-hosted executor](examples/application-hosted-executor.md): the design example for serving multiple project Workspaces from one application.
+- [Workspace](workspace.md): provider contracts, resource lifetime, and supported modes.
+- [Application-hosted executor](examples/application-hosted-executor.md): runnable authenticated hosting and multiple project routes.
 - [Documentation maintenance](documentation.md): preview, validate, and deploy this site.
 - [Releasing](releasing.md): prepare and publish Python artifacts.
 

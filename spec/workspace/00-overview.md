@@ -68,10 +68,10 @@ In an application-hosted service, each executor connection has its own resource 
 
 Run cancellation preserves the bridge for native cleanup. Where the protocol has only conversation-scoped resource identity, ohkit must not infer that all handles belong to the cancelled Run. Explicit native release or binding close ends their ownership. [Execution cleanup](../execution/01-thread-run.md#cancellation-and-cleanup) governs unresolved effects and cleanup errors.
 
-History resume can attach a fresh Workspace. It does not restore old process objects, terminal IDs, or open files. No durable Workspace registry is required.
+Where a backend supports Workspace history rebinding, resume can attach a fresh Workspace. It does not restore old process objects, terminal IDs, or open files. No durable Workspace registry is required. The current Codex executor supports new Threads only; its [supported-mode boundary](../backends/01-codex.md#supported-mode-boundary) prohibits pretending that turn-level environment selection covers resume startup I/O.
 
 ## a13n Embedding
 
 An a13n adapter implements this interface over its Environment operations and retains downstream multi-environment routing. ohkit has no dependency on a13n or its Environment types.
 
-When a13n Environment instances are scoped to an enclosing a13n Run, the live ohkit binding must fit within that lifetime. A later a13n Run supplies fresh Environment adapters and resumes native history. This preserves conversation context, not live process continuity. A longer-lived native binding requires the host to supply a correspondingly longer-lived Workspace; ohkit cannot extend a borrowed provider's lifetime.
+When a13n Environment instances are scoped to an enclosing a13n Run, the live ohkit binding must fit within that lifetime. A later a13n Run can supply fresh Environment adapters and resume native history only through a backend supporting that rebinding; the current Codex executor does not. This preserves conversation context, not live process continuity. A longer-lived native binding requires the host to supply a correspondingly longer-lived Workspace; ohkit cannot extend a borrowed provider's lifetime.

@@ -255,6 +255,32 @@ class NamespaceDynamicToolSpec(WireModel):
     type: Annotated[Literal["namespace"], Field(title="NamespaceDynamicToolSpecType")]
 
 
+class EnvironmentAddResponse(WireModel):
+    pass
+
+
+class EnvironmentSkillsParams(WireModel):
+    required: Annotated[
+        list[str] | None,
+        Field(description="Exact catalog names that must be available from this environment."),
+    ] = None
+
+
+class EnvironmentStatusParams(WireModel):
+    environment_id: Annotated[str, Field(alias="environmentId", description="Environment id to inspect.")]
+
+
+class EnvironmentStatusResponse(WireModel):
+    error: Annotated[
+        str | None,
+        Field(description="Human-readable detail for `disconnected` and `unknown`; omitted for other statuses."),
+    ] = None
+    status: Annotated[
+        Literal["ready", "pending", "disconnected", "unknown"],
+        Field(description="Current status observed without starting or recovering the environment."),
+    ]
+
+
 class FileChangeRequestApprovalParams(WireModel):
     grant_root: Annotated[
         str | None,
@@ -1116,6 +1142,30 @@ class FileIdContentItem(WireModel):
     detail: Literal["auto", "low", "high", "original"] | None = None
     type: Annotated[Literal["input_image"], Field(title="InputImageContentItemType")]
     file_id: str
+
+
+class EnvironmentAddParams(WireModel):
+    auth_bearer_token: Annotated[
+        str | None,
+        Field(
+            alias="authBearerToken",
+            description="Optional raw bearer token for executor authentication, including reconnects. Requires a secure transport or a loopback destination.",
+        ),
+    ] = None
+    connect_timeout_ms: Annotated[
+        int | None,
+        Field(
+            alias="connectTimeoutMs",
+            description="Optional WebSocket connection timeout. The server default applies when omitted.",
+            ge=0,
+        ),
+    ] = None
+    environment_id: Annotated[str, Field(alias="environmentId")]
+    exec_server_url: Annotated[str, Field(alias="execServerUrl")]
+    skills: Annotated[
+        EnvironmentSkillsParams | None,
+        Field(description="Required skills supplied by this environment, checked before model inference."),
+    ] = None
 
 
 class PathFileSystemPath(WireModel):

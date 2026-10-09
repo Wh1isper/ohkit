@@ -42,7 +42,7 @@ A local convenience host may compose the same bridge with a loopback listener. I
 
 ## Conversation and Control
 
-Native thread creation, resume, and fork map to their ohkit counterparts within Codex's history scope. A Run starts native work and follows Codex's terminal evidence. Native follow-up activity is included only where it belongs to admitted foreground work.
+Native thread creation, resume, and fork map to their ohkit counterparts within Codex's history scope when the selected mode supports them. External executor selection is supported for new Threads only; its history boundary is defined below. A Run starts native work and follows Codex's terminal evidence. Native follow-up activity is included only where it belongs to admitted foreground work.
 
 Active steering uses `turn/steer` with the expected current native Turn ID. Rejection because the Turn ended does not fall back to `turn/start`. Interruption requests use the native active-work cancellation path and await termination evidence; the request response alone is not cancellation completion.
 
@@ -50,7 +50,7 @@ Native approval and question requests go through the [interaction contract](../e
 
 ## Workspace Binding
 
-The control adapter registers the supplied executor endpoint with `environment/add` and selects that environment for the native conversation. Registration acceptance is not execution readiness. Connection preparation and usable tool availability must be established from native state; no fixed sleep is a compatibility strategy.
+The control adapter registers the supplied executor endpoint with `environment/add` and selects that environment for the native conversation. Registration acceptance is not execution readiness. Connection preparation and usable tool availability must be established from native state; no fixed sleep is a compatibility strategy. The adapter waits for native ready status, requests non-deferred Thread preparation with shell snapshots disabled, verifies the exact selected environment and cwd, and checks readiness again before returning the attachment.
 
 Native app-server path strings and executor file URIs are different representations. The adapter preserves the selected Workspace's namespace and converts representation only. Native response fields describing the app-server host must not overwrite the supplied target cwd or be treated as executor metadata.
 
@@ -59,6 +59,8 @@ Codex remains responsible for parsing and applying its patch language; the selec
 The adapter preserves independent process exit and output closure. If native tool result collection treats exit as output completion, the bridge publishes terminal process evidence only after draining the output it promises to deliver. Sequence numbers and retention remain native-adapter details, not public Workspace IDs.
 
 ## Supported-Mode Boundary
+
+The pinned native resume/fork requests cannot select an environment before startup I/O. Registering an endpoint changes app-server-wide defaults; it does not establish an exact history binding. External executor resume/fork is therefore rejected, not emulated by starting a hidden Turn or silently using host I/O. External Threads advertise Workspace support but not resume/fork. After attempting executor registration, that backend requires an explicit executor for every new Thread and rejects resume/fork. Applications dedicate an app-server to external execution and do not share it with default-environment consumers. A persisted ThreadRef carries no executor binding; callers must not reopen external history as ordinary host history.
 
 The initial integration targets the file/process executor path. Optional capability discovery, environment-config access, HTTP forwarding, shell snapshots, writable streams, and managed networking are not implicitly supplied by Workspace. The adapter advertises only implemented features and admits only modes whose required paths it can serve.
 
@@ -76,10 +78,10 @@ A schema-compatible message is not proof of execution completion, steering consu
 
 ## Upstream Basis
 
-The unimplemented Workspace/executor mapping is grounded in Codex `rust-v0.161.0` and remains version-sensitive. The implemented control adapter's current baseline is owned by [Codex compatibility](../../docs/codex.md#compatibility-and-validation):
+The implemented Workspace/executor mapping is grounded in Codex `rust-v0.162.0` and remains version-sensitive. The control and executor baseline is owned by [Codex compatibility](../../docs/codex.md#compatibility-and-validation):
 
-- [App-server environment selection](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/app-server-protocol/src/protocol/v2/environment.rs).
-- [Executor protocol](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/exec-server-protocol/src/protocol.rs), including `process/start`, output/exit/close, file operations, metadata, and capability advertisement.
-- [Selected-environment integration tests](https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/app-server/tests/suite/v2/selected_environment.rs).
+- [App-server environment selection](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/app-server-protocol/src/protocol/v2/environment.rs).
+- [Executor protocol](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/exec-server-protocol/src/protocol.rs), including `process/start`, output/exit/close, file operations, metadata, and capability advertisement.
+- [Selected-environment integration tests](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/app-server/tests/suite/v2/selected_environment.rs).
 
 This source baseline is not a declaration of a shipped ohkit compatibility range. Production admission and the tested range belong to the implemented adapter.

@@ -42,6 +42,8 @@ class SurfaceChanged(ValueError):
 # This is the supported adapter surface, not a second definition of its fields.
 CALLS = {
     "initialize": ("InitializeParams", "InitializeResponse"),
+    "environment/add": ("EnvironmentAddParams", "EnvironmentAddResponse"),
+    "environment/status": ("EnvironmentStatusParams", "EnvironmentStatusResponse"),
     "thread/start": ("ThreadStartParams", "ThreadStartResponse"),
     "thread/resume": ("ThreadResumeParams", "ThreadResumeResponse"),
     "thread/fork": ("ThreadForkParams", "ThreadForkResponse"),

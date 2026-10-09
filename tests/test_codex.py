@@ -993,3 +993,100 @@ def test_malformed_typed_start_response_settles_unknown_and_disables_connection(
                 await backend.new_thread()
 
     asyncio.run(scenario())
+
+
+def test_executor_selection_readiness_reuse_and_history_admission():
+    from ohkit import ThreadRef, UnsupportedError
+    from ohkit.backends.codex import CodexExecutor, CodexThreadOptions
+
+    async def scenario():
+        endpoint = CodexExecutor("ws://executor/project", bearer_token="private")
+        options = CodexThreadOptions(sandbox="danger-full-access")
+        async with connected() as (peer, backend):
+            peer.hold_thread = True
+            with pytest.raises(UnsupportedError):
+                await backend.new_thread(cwd="/target", executor=endpoint)
+            with pytest.raises(ValueError):
+                await backend.new_thread(executor=endpoint, options=options)
+            assert not any(c["method"] == "environment/add" for c in peer.all_calls)
+            for index in range(2):
+                creation = asyncio.create_task(backend.new_thread(cwd="/target", executor=endpoint, options=options))
+                if index == 0:
+                    registration = await peer.next("environment/add")
+                    identity = registration["params"]["environmentId"]
+                    assert registration["params"]["authBearerToken"] == "private"
+                    await peer.response(registration, {})
+                    pending = await peer.next("environment/status")
+                    await peer.response(pending, {"status": "pending"})
+                status = await peer.next("environment/status")
+                assert not creation.done()
+                await peer.response(status, {"status": "ready"})
+                start = await peer.next("thread/start")
+                assert start["params"]["environments"] == [{"environmentId": identity, "cwd": "/target"}]
+                assert start["params"]["cwd"] == "/target"
+                assert start["params"]["config"]["features.deferred_executor"] is False
+                response = thread_response(f"external-{index}")
+                response["thread"]["environments"] = [
+                    {"environmentId": identity, "cwd": "/target", "runtimeWorkspaceRoots": []}
+                ]
+                await peer.response(start, response)
+                await peer.response(await peer.next("environment/status"), {"status": "ready"})
+                thread = await creation
+                assert thread.capabilities.workspace and not thread.capabilities.resume and not thread.capabilities.fork
+            assert len([c for c in peer.all_calls if c["method"] == "environment/add"]) == 1
+            with pytest.raises(UnsupportedError):
+                await backend.new_thread()
+            for method in (backend.resume, backend.fork):
+                with pytest.raises(UnsupportedError):
+                    await method(thread.ref)
+            assert not any(c["method"] in ("thread/resume", "thread/fork", "turn/start") for c in peer.all_calls)
+        async with connected() as (peer, backend):
+            for method in (backend.resume, backend.fork):
+                with pytest.raises(UnsupportedError):
+                    await method(ThreadRef("codex", "external", "test-service"), executor=endpoint)
+            assert not any(c["method"].startswith("thread/") for c in peer.all_calls)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", ["disconnected", "unknown", "pending"])
+def test_executor_not_ready_never_starts_thread(status):
+    from ohkit.backends.codex import CodexExecutor, CodexThreadOptions
+
+    async def scenario():
+        async with connected() as (peer, backend):
+            creation = asyncio.create_task(
+                backend.new_thread(
+                    cwd="/target",
+                    executor=CodexExecutor("ws://executor/project", readiness_timeout=0.02),
+                    options=CodexThreadOptions(sandbox="danger-full-access"),
+                )
+            )
+            await peer.response(await peer.next("environment/add"), {})
+            await peer.response(await peer.next("environment/status"), {"status": status})
+            with pytest.raises(UnavailableError):
+                await creation
+            assert not any(c["method"] == "thread/start" for c in peer.all_calls)
+
+    asyncio.run(scenario())
+
+
+def test_executor_mismatched_selection_is_not_an_attachment():
+    from ohkit.backends.codex import CodexExecutor, CodexThreadOptions
+
+    async def scenario():
+        async with connected() as (peer, backend):
+            creation = asyncio.create_task(
+                backend.new_thread(
+                    cwd="/target",
+                    executor=CodexExecutor("ws://executor/project"),
+                    options=CodexThreadOptions(sandbox="danger-full-access"),
+                )
+            )
+            await peer.response(await peer.next("environment/add"), {})
+            await peer.response(await peer.next("environment/status"), {"status": "ready"})
+            with pytest.raises(ProtocolError, match="selected executor"):
+                await creation
+            assert not any(c["method"] == "turn/start" for c in peer.all_calls)
+
+    asyncio.run(scenario())

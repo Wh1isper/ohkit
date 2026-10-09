@@ -118,6 +118,12 @@ class RPC:
     async def initialize(self, params: wire.InitializeParams) -> wire.InitializeResponse:
         return await self._typed_call("initialize", params, wire.InitializeResponse)
 
+    async def environment_add(self, params: wire.EnvironmentAddParams) -> wire.EnvironmentAddResponse:
+        return await self._typed_call("environment/add", params, wire.EnvironmentAddResponse, omit_none=True)
+
+    async def environment_status(self, params: wire.EnvironmentStatusParams) -> wire.EnvironmentStatusResponse:
+        return await self._typed_call("environment/status", params, wire.EnvironmentStatusResponse)
+
     async def thread_start(self, params: wire.ThreadStartParams) -> wire.ThreadStartResponse:
         return await self._typed_call("thread/start", params, wire.ThreadStartResponse, omit_none=True)
 
