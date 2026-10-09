@@ -1,4 +1,4 @@
-"""Run: uv run python examples/codex.py (requires configured Codex 0.161.0)."""
+"""Run: uv run python examples/codex.py. See docs/codex.md for Codex setup and compatibility."""
 
 import asyncio
 

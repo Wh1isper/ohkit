@@ -8,7 +8,7 @@ ohkit is a pre-alpha Python library. This checkout implements typed asynchronous
 
 The repository, Python distribution, and import package are all named `ohkit`. Python 3.13 or newer is required. Both owned stdio control and connections to caller-owned WebSocket services are available in the default installation. Codex must be installed separately and configured for its native model provider.
 
-The [architecture specifications](spec/README.md) own the execution model and future Workspace boundary. The [getting-started guide](docs/getting-started.md) and [Codex guide](docs/codex.md) describe runnable source APIs and the tested native version (`0.161.0`), rather than promising compatibility with every upstream release.
+The [architecture specifications](spec/README.md) own the execution model and future Workspace boundary. The [getting-started guide](docs/getting-started.md) and [Codex guide](docs/codex.md) describe runnable source APIs and the tested native version, rather than promising compatibility with every upstream release.
 
 ## Quick start
 

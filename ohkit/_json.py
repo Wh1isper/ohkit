@@ -56,33 +56,13 @@ def obj(value: JSONValue) -> dict[str, JSONValue]:
     return value
 
 
-def array(value: JSONValue) -> list[JSONValue]:
-    if not isinstance(value, list):
-        raise ProtocolError("Expected native array")
-    return value
-
-
 def string(value: JSONValue) -> str:
     if not isinstance(value, str):
         raise ProtocolError("Expected native string")
     return value
 
 
-def optional_string(value: JSONValue) -> str | None:
-    return None if value is None else string(value)
-
-
 def integer(value: JSONValue) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ProtocolError("Expected native integer")
     return value
-
-
-def boolean(value: JSONValue) -> bool:
-    if not isinstance(value, bool):
-        raise ProtocolError("Expected native boolean")
-    return value
-
-
-def strings(value: JSONValue) -> tuple[str, ...]:
-    return tuple(string(item) for item in array(value))
