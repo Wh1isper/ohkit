@@ -532,3 +532,261 @@ def test_process_wait_observes_exit_before_inherited_output_closes(tmp_path):
         assert (await handle.read(1)).eof
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("recursive", [False, True])
+@pytest.mark.parametrize("destination_kind", ["file_link", "dangling_link", "directory_link"])
+def test_copy_rejects_destination_symlinks_without_modifying_referents(tmp_path, recursive, destination_kind):
+    async def scenario():
+        workspace = LocalWorkspace(tmp_path, env={})
+        source, destination, referent = (tmp_path / name for name in ("source", "destination", "referent"))
+        if destination_kind == "directory_link":
+            referent.mkdir()
+            (referent / "data").write_bytes(b"original")
+        elif destination_kind == "file_link":
+            referent.write_bytes(b"original")
+        if recursive:
+            source.mkdir()
+            destination.mkdir()
+            source = source / "entry"
+            destination = destination / "entry"
+        if destination_kind == "directory_link":
+            source.mkdir()
+            (source / "data").write_bytes(b"replacement")
+        else:
+            source.write_bytes(b"replacement")
+        destination.symlink_to(referent)
+        with pytest.raises(FileExistsError):
+            await workspace.files.copy(
+                "source", "destination", recursive=recursive or destination_kind == "directory_link", overwrite=True
+            )
+        assert destination.is_symlink()
+        if destination_kind == "dangling_link":
+            assert not referent.exists()
+        else:
+            assert (referent / "data" if referent.is_dir() else referent).read_bytes() == b"original"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("cwd", [None, ".", "nested", "absolute"])
+def test_process_cwd_uses_the_same_namespace_as_files(tmp_path, cwd):
+    async def scenario():
+        root = tmp_path / "workspace"
+        root.mkdir()
+        nested = root / "nested"
+        nested.mkdir()
+        absolute = tmp_path / "elsewhere"
+        absolute.mkdir()
+        workspace = LocalWorkspace(root, env={})
+        requested = str(absolute) if cwd == "absolute" else cwd
+        expected = absolute if cwd == "absolute" else nested if cwd == "nested" else root
+        (expected / "marker").write_bytes(b"target")
+        process = await workspace.start_process(ProcessRequest(("/bin/pwd",), cwd=requested))
+        try:
+            output = b""
+            while True:
+                block = await process.read(4096)
+                output += block.data
+                if block.eof:
+                    break
+            assert output.decode().strip() == str(expected)
+            assert await workspace.files.read(str(expected / "marker")) == b"target"
+        finally:
+            await process.close()
+
+    asyncio.run(scenario())
+
+
+async def completed(peer, identity):
+    async with asyncio.timeout(2):
+        while True:
+            result = (await peer.call("process/read", processId=identity, waitMs=100))["result"]
+            if result["closed"]:
+                return result
+
+
+def test_completed_processes_release_resources_and_have_separate_bounded_replay(tmp_path):
+    async def scenario():
+        workspace = ControlledWorkspace(tmp_path)
+        handles = []
+        async with client(CodexExecBridge(workspace, handle_limit=1, replay_limit=2)) as (peer, _):
+            for index in range(5):
+                handle = workspace.process = ControlledProcess()
+                handles.append(handle)
+                identity = f"p{index}"
+                assert "result" in await peer.call("process/start", **{**start_params(tmp_path), "processId": identity})
+                handle.exited.set()
+                await handle.output.put(ProcessOutput(str(index).encode(), eof=True))
+                result = await completed(peer, identity)
+                assert result["exitCode"] == 0 and handle.closed
+            # The last two records survive without retaining their provider handles.
+            for index in (3, 4):
+                result = await completed(peer, f"p{index}")
+                assert base64.b64decode(result["chunks"][0]["chunk"]) == str(index).encode()
+            assert "error" in await peer.call("process/read", processId="p0")
+            assert "error" in await peer.call("process/start", **{**start_params(tmp_path), "processId": "p0"})
+            assert len(workspace.requests) == 5  # Eviction never makes a launch safe to replay.
+            assert (await peer.call("process/write", processId="p0", writeId="late", chunk="YQ=="))["result"] == {
+                "status": "unknownProcess"
+            }
+            assert (await peer.call("process/write", processId="p4", writeId="late", chunk="YQ=="))["result"] == {
+                "status": "stdinClosed"
+            }
+            assert (await peer.call("process/terminate", processId="p4"))["result"] == {"running": False}
+        assert all(handle.closed for handle in handles)
+
+    asyncio.run(scenario())
+
+
+def test_live_process_limit_and_write_deduplication_are_not_lifetime_command_quotas(tmp_path):
+    async def scenario():
+        workspace = ControlledWorkspace(tmp_path)
+        async with client(CodexExecBridge(workspace, handle_limit=1)) as (peer, _):
+            assert "result" in await peer.call("process/start", **start_params(tmp_path))
+            assert "error" in await peer.call("process/start", **{**start_params(tmp_path), "processId": "second"})
+            for index in range(300):
+                response = await peer.call("process/write", processId="p", writeId=str(index), chunk="YQ==")
+                assert response["result"] == {"status": "accepted"}
+            response = await peer.call("process/write", processId="p", writeId="0", chunk="Yg==")
+            assert response["result"] == {"status": "accepted"}
+            assert workspace.process.written == [b"a"] * 300
+            workspace.process.exited.set()
+            await workspace.process.output.put(ProcessOutput(eof=True))
+            await completed(peer, "p")
+            response = await peer.call("process/write", processId="p", writeId="0", chunk="Yg==")
+            assert response["result"] == {"status": "accepted"}
+            workspace.process = ControlledProcess()
+            assert "result" in await peer.call("process/start", **{**start_params(tmp_path), "processId": "second"})
+
+    asyncio.run(scenario())
+
+
+def test_cancellation_during_natural_release_waits_for_one_close(tmp_path):
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        closes = []
+
+        class SlowClose(ControlledProcess):
+            async def close(self):
+                closes.append(True)
+                entered.set()
+                await release.wait()
+                await super().close()
+
+        workspace = ControlledWorkspace(tmp_path)
+        workspace.process = SlowClose()
+        peer = Client()
+        task = asyncio.create_task(CodexExecBridge(workspace).serve(peer.messages(), peer.send))
+        await peer.initialize()
+        await peer.call("process/start", **start_params(tmp_path))
+        workspace.process.exited.set()
+        await workspace.process.output.put(ProcessOutput(eof=True))
+        try:
+            async with asyncio.timeout(2):
+                await entered.wait()
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done() and not workspace.process.closed
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert closes == [True] and workspace.process.closed
+        finally:
+            release.set()
+            await peer.incoming.put(None)
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_natural_process_release_failure_reaches_host_without_closed_notification(tmp_path):
+    from ohkit import CleanupError
+
+    async def scenario():
+        closes = []
+
+        class BrokenClose(ControlledProcess):
+            async def close(self):
+                closes.append(True)
+                raise OSError("provider cleanup failed")
+
+        workspace = ControlledWorkspace(tmp_path)
+        workspace.process = BrokenClose()
+        peer = Client()
+        task = asyncio.create_task(CodexExecBridge(workspace).serve(peer.messages(), peer.send))
+        await peer.initialize()
+        await peer.call("process/start", **start_params(tmp_path))
+        workspace.process.exited.set()
+        await workspace.process.output.put(ProcessOutput(eof=True))
+        with pytest.raises(CleanupError):
+            async with asyncio.timeout(2):
+                await task
+        assert closes == [True]
+        frames = []
+        while not peer.outgoing.empty():
+            frames.append(peer.outgoing.get_nowait())
+        assert not any(frame.get("method") == "process/closed" for frame in frames)
+
+    asyncio.run(scenario())
+
+
+def test_uncertain_provider_launch_cannot_be_replayed_with_the_same_id(tmp_path):
+    async def scenario():
+        effects = []
+
+        class Workspace(ControlledWorkspace):
+            async def start_process(self, request):
+                effects.append(request)
+                raise OSError("acknowledgement lost after launch")
+
+        async with client(CodexExecBridge(Workspace(tmp_path))) as (peer, _):
+            for _ in range(2):
+                assert "error" in await peer.call("process/start", **start_params(tmp_path))
+            assert len(effects) == 1
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_recursive_copy_preserves_executable_mode(tmp_path, overwrite):
+    async def scenario():
+        source, destination = tmp_path / "source", tmp_path / "destination"
+        (source / "bin").mkdir(parents=True)
+        executable = source / "bin" / "command"
+        executable.write_bytes(b"#!/bin/sh\nprintf copied")
+        executable.chmod(0o755)
+        if overwrite:
+            (destination / "bin").mkdir(parents=True)
+            (destination / "bin" / "command").write_bytes(b"old")
+            (destination / "bin" / "command").chmod(0o600)
+        workspace = LocalWorkspace(tmp_path, env={})
+        await workspace.files.copy("source", "destination", recursive=True, overwrite=overwrite)
+        copied = destination / "bin" / "command"
+        assert copied.stat().st_mode & 0o777 == 0o755
+        assert copied.stat().st_mtime_ns == executable.stat().st_mtime_ns
+        process = await workspace.start_process(ProcessRequest((str(copied),)))
+        try:
+            assert await process.wait() == 0
+            assert (await process.read(100)).data == b"copied"
+        finally:
+            await process.close()
+
+    asyncio.run(scenario())
+
+
+def test_copy_merge_preserves_source_links_and_overwrites_regular_files(tmp_path):
+    async def scenario():
+        source, destination = tmp_path / "source", tmp_path / "destination"
+        source.mkdir()
+        destination.mkdir()
+        (source / "file").write_bytes(b"new")
+        (source / "link").symlink_to("file")
+        (destination / "file").write_bytes(b"old")
+        (destination / "keep").write_bytes(b"keep")
+        await LocalWorkspace(tmp_path, env={}).files.copy("source", "destination", recursive=True, overwrite=True)
+        assert (destination / "file").read_bytes() == b"new"
+        assert (destination / "link").is_symlink() and (destination / "link").readlink().as_posix() == "file"
+        assert (destination / "keep").read_bytes() == b"keep"
+
+    asyncio.run(scenario())

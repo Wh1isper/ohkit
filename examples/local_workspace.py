@@ -140,19 +140,27 @@ class LocalFiles:
     ) -> None:
         src, dst = self.path(source, target), self.path(destination, target)
 
-        def copy() -> None:
-            if not overwrite and (dst.exists() or dst.is_symlink()):
-                raise FileExistsError(str(dst))
-            if src.is_symlink():
-                dst.symlink_to(os.readlink(src))
-            elif src.is_dir():
+        def copy(source: Path, destination: Path) -> None:
+            # copyfile(follow_symlinks=False) only preserves the SOURCE link.
+            # Apply the destination policy at every level of a directory merge.
+            if destination.is_symlink() or (not overwrite and destination.exists()):
+                raise FileExistsError(str(destination))
+            if source.is_symlink():
+                destination.symlink_to(os.readlink(source))
+            elif source.is_dir():
                 if not recursive:
-                    raise IsADirectoryError(str(src))
-                shutil.copytree(src, dst, dirs_exist_ok=overwrite, symlinks=True)
+                    raise IsADirectoryError(str(source))
+                destination.mkdir(exist_ok=overwrite)
+                for entry in source.iterdir():
+                    child = destination / entry.name
+                    copy(entry, child)
+                    # Preserve copytree's child metadata, including executable modes.
+                    shutil.copystat(entry, child, follow_symlinks=False)
+                shutil.copystat(source, destination)
             else:
-                shutil.copyfile(src, dst, follow_symlinks=False)
+                shutil.copyfile(source, destination, follow_symlinks=False)
 
-        await asyncio.to_thread(copy)
+        await asyncio.to_thread(copy, src, dst)
 
     async def canonicalize(self, path: str, *, target: str | None = None) -> str:
         return str(await asyncio.to_thread(self.path(path, target).resolve, strict=True))
@@ -285,7 +293,7 @@ class LocalWorkspace:
         env.update(request.env)
         process = await asyncio.create_subprocess_exec(
             *request.argv,
-            cwd=request.cwd or str(self.cwd),
+            cwd=self.files.path(request.cwd if request.cwd is not None else ".", request.target),
             env=env,
             stdin=asyncio.subprocess.PIPE if request.stdin else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,

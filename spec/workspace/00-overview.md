@@ -66,7 +66,7 @@ The caller owns the Workspace and its backing providers. ohkit owns bridge proto
 
 In an application-hosted service, each executor connection has its own resource scope even when several connections borrow one Workspace. A project URL and a Workspace object are not native session identities. The [Codex hosting contract](../backends/01-codex.md#hosting-and-connection-ownership) owns its connection cleanup and reconnection boundary.
 
-Run cancellation preserves the bridge for native cleanup. Where the protocol has only conversation-scoped resource identity, ohkit must not infer that all handles belong to the cancelled Run. Explicit native release or binding close ends their ownership. [Execution cleanup](../execution/01-thread-run.md#cancellation-and-cleanup) governs unresolved effects and cleanup errors.
+Run cancellation preserves the bridge for native cleanup. Where the protocol has only conversation-scoped resource identity, ohkit must not infer that all handles belong to the cancelled Run. Completed commands may release their handles after exit and output settlement while retaining adapter-owned terminal observations. Explicit native release or binding close settles any remaining owned handles. [Execution cleanup](../execution/01-thread-run.md#cancellation-and-cleanup) governs unresolved effects and cleanup errors.
 
 Where a backend supports Workspace history rebinding, resume can attach a fresh Workspace. It does not restore old process objects, terminal IDs, or open files. No durable Workspace registry is required. The current Codex executor supports new Threads only; its [supported-mode boundary](../backends/01-codex.md#supported-mode-boundary) prohibits pretending that turn-level environment selection covers resume startup I/O.
 

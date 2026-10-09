@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import AsyncIterable, Awaitable, Callable
 from pathlib import PurePosixPath, PureWindowsPath
 from urllib.parse import quote, unquote, urlsplit
@@ -82,12 +82,22 @@ class CodexExecBridge:
     The initial mode accepts explicit unsandboxed file/process operations only.
     """
 
-    def __init__(self, workspace: Workspace, *, output_capacity: int = 1024 * 1024, handle_limit: int = 256) -> None:
-        if output_capacity < 1 or handle_limit < 1:
+    def __init__(
+        self,
+        workspace: Workspace,
+        *,
+        output_capacity: int = 1024 * 1024,
+        handle_limit: int = 256,
+        replay_limit: int = 256,
+        request_limit: int = 256,
+    ) -> None:
+        if min(output_capacity, handle_limit, replay_limit, request_limit) < 1:
             raise ValueError("Capacities must be positive")
         self.workspace = workspace
         self.output_capacity = output_capacity
         self.handle_limit = handle_limit
+        self.replay_limit = replay_limit
+        self.request_limit = request_limit
 
     async def serve(self, incoming: AsyncIterable[str], send: Callable[[str], Awaitable[None]]) -> None:
         """Process complete text messages and settle connection-owned resources.
@@ -116,6 +126,10 @@ class _Connection:
         self.paths: _Paths | None = None
         self.files: dict[str, ReadFile] = {}
         self.processes: dict[str, _Process] = {}
+        self.completed: OrderedDict[str, _Process] = OrderedDict()
+        # Retain only identity tombstones after replay eviction. Arbitrary native
+        # IDs have no ordering from which we could infer that an old ID is stale.
+        self.started: set[str] = set()
         self.requests: dict[int | str, asyncio.Task[None]] = {}
         self.write_lock = asyncio.Lock()
         self.operation_lock = asyncio.Lock()
@@ -153,7 +167,7 @@ class _Connection:
                         raise ProtocolError("Unsupported executor notification")
                     continue
                 identity = request_id(message["id"])
-                if identity in self.requests or len(self.requests) >= self.bridge.handle_limit:
+                if identity in self.requests or len(self.requests) >= self.bridge.request_limit:
                     raise ProtocolError("Duplicate or excessive in-flight executor requests")
                 raw_params = message.get("params")
                 params = {} if raw_params is None else obj(raw_params)
@@ -225,62 +239,80 @@ class _Connection:
         if method.startswith("fs/"):
             return await self.file_operation(method, params)
         if method == "process/start":
-            start = decode(wire.Start, params)
-            _unsandboxed(start.sandbox)
-            if (
-                start.shell_snapshot is not None
-                or start.enforce_managed_network
-                or start.managed_network is not None
-                or start.network_proxy is not None
-            ):
-                raise UnsupportedError("Shell snapshots and managed networking are not supported")
-            if start.process_id in self.processes or len(self.processes) >= self.bridge.handle_limit:
-                raise ProtocolError("Process identity reused or connection handle limit exceeded")
-            policy = start.env_policy
-            environment = EnvironmentPolicy()
-            if policy is not None:
-                # Native default secret exclusions are part of the requested policy.
-                excludes = tuple(policy.exclude)
-                if not policy.ignore_default_excludes:
-                    excludes = ("*KEY*", "*SECRET*", "*TOKEN*", *excludes)
-                environment = EnvironmentPolicy(
-                    policy.inherit, excludes, tuple(policy.include_only), tuple(policy.set.items())
-                )
-            process = await self.workspace.start_process(
-                ProcessRequest(
-                    argv=tuple(start.argv),
-                    cwd=self.paths.path(start.cwd),
-                    env=tuple(start.env.items()),
-                    environment=environment,
-                    stdin=start.pipe_stdin,
-                    tty=start.tty,
-                    argv0=start.arg0,
-                )
-            )
-            owned = _Process(self, start.process_id, process)
-            self.processes[start.process_id] = owned
-            owned.pump = asyncio.create_task(owned.observe())
-            return {"processId": start.process_id, "sandboxType": "none"}
+            return await self.start_process(decode(wire.Start, params))
         if method == "process/write":
             write = decode(wire.Write, params)
-            process = self.processes.get(write.process_id)
+            process = self.process(write.process_id)
             if process is None:
                 return {"status": "unknownProcess"}
             return await process.write(write)
         if method == "process/signal":
             signal = decode(wire.Signal, params)
-            await self.processes[signal.process_id].handle.signal(signal.signal)
+            process = self.process(signal.process_id)
+            if process is None:
+                raise ProtocolError("Process is unknown or no longer retained")
+            if process.handle is not None:
+                await process.handle.signal(signal.signal)
             return {}
         if method == "process/terminate":
             terminate = decode(wire.Process, params)
-            process = self.processes.get(terminate.process_id)
+            process = self.process(terminate.process_id)
             if process is None:
                 return {"running": False}
-            running = process.exit_code is None and process.failure is None
-            if running:
+            running = process.handle is not None and process.exit_code is None and process.failure is None
+            if running and process.handle is not None:
                 await process.handle.signal("kill")
             return {"running": running}
         raise UnsupportedError("Executor method not implemented")
+
+    def process(self, identity: str) -> _Process | None:
+        return self.processes.get(identity) or self.completed.get(identity)
+
+    def retire(self, process: _Process) -> None:
+        del self.processes[process.identity]
+        self.completed[process.identity] = process
+        while len(self.completed) > self.bridge.replay_limit:
+            self.completed.popitem(last=False)
+
+    async def start_process(self, start: wire.Start) -> dict[str, JSONValue]:
+        assert self.paths is not None
+        _unsandboxed(start.sandbox)
+        if (
+            start.shell_snapshot is not None
+            or start.enforce_managed_network
+            or start.managed_network is not None
+            or start.network_proxy is not None
+        ):
+            raise UnsupportedError("Shell snapshots and managed networking are not supported")
+        if start.process_id in self.started or len(self.processes) >= self.bridge.handle_limit:
+            raise ProtocolError("Process identity reused or live process limit exceeded")
+        policy = start.env_policy
+        environment = EnvironmentPolicy()
+        if policy is not None:
+            # Native default secret exclusions are part of the requested policy.
+            excludes = tuple(policy.exclude)
+            if not policy.ignore_default_excludes:
+                excludes = ("*KEY*", "*SECRET*", "*TOKEN*", *excludes)
+            environment = EnvironmentPolicy(
+                policy.inherit, excludes, tuple(policy.include_only), tuple(policy.set.items())
+            )
+        request = ProcessRequest(
+            argv=tuple(start.argv),
+            cwd=self.paths.path(start.cwd),
+            env=tuple(start.env.items()),
+            environment=environment,
+            stdin=start.pipe_stdin,
+            tty=start.tty,
+            argv0=start.arg0,
+        )
+        # A provider error can follow side effects. The same native launch ID
+        # cannot be dispatched again even if no handle or replay was returned.
+        self.started.add(start.process_id)
+        process = await self.workspace.start_process(request)
+        owned = _Process(self, start.process_id, process)
+        self.processes[start.process_id] = owned
+        owned.pump = asyncio.create_task(owned.observe())
+        return {"processId": start.process_id, "sandboxType": "none"}
 
     async def file_operation(self, method: str, params: dict[str, JSONValue]) -> dict[str, JSONValue]:
         assert self.paths is not None
@@ -371,7 +403,9 @@ class _Connection:
     async def read_process(self, request: wire.Read) -> dict[str, JSONValue]:
         if not self.initialized:
             raise ProtocolError("Initialize before executor operations")
-        process = self.processes[request.process_id]
+        process = self.process(request.process_id)
+        if process is None:
+            raise ProtocolError("Process is unknown or no longer retained")
         after = request.after_seq or 0
         if after >= process.seq and not process.closed and request.wait_ms and not self.closing:
             try:
@@ -433,7 +467,8 @@ class _Process:
     def __init__(self, connection: _Connection, identity: str, handle: Process) -> None:
         self.connection = connection
         self.identity = identity
-        self.handle = handle
+        self.handle: Process | None = handle
+        self.release_task: asyncio.Task[None] | None = None
         self.output: deque[tuple[int, str, bytes]] = deque()
         self.bytes = 0
         self.seq = 0
@@ -452,10 +487,8 @@ class _Process:
             data = _bytes(request.chunk)
             if request.write_id in self.writes:
                 return {"status": "accepted"}
-            if self.connection.closing:
+            if self.connection.closing or self.handle is None or self.exit_code is not None:
                 return {"status": "stdinClosed"}
-            if len(self.writes) >= self.connection.bridge.handle_limit:
-                raise UnsupportedError("Connection write deduplication limit reached")
             try:
                 await self.handle.write(data)
             except (BrokenPipeError, ConnectionResetError):
@@ -468,7 +501,16 @@ class _Process:
         if self.pump is not None:
             self.pump.cancel()
             await asyncio.gather(self.pump, return_exceptions=True)
-        await self.handle.close()
+        await self.release()
+
+    async def release(self) -> None:
+        if self.release_task is None:
+            assert self.handle is not None
+            self.release_task = asyncio.create_task(self.handle.close())
+        # Natural completion and connection cleanup share exactly one release.
+        # Cancelling the output pump must not abandon a close already in flight.
+        await asyncio.shield(self.release_task)
+        self.handle = None
 
     async def notify(self, method: str, fields: dict[str, JSONValue]) -> None:
         self.seq += 1
@@ -481,8 +523,10 @@ class _Process:
     async def observe(self) -> None:
         try:
             await self.ready.wait()
+            handle = self.handle
+            assert handle is not None
             while True:
-                block = await self.handle.read(min(16384, self.connection.bridge.output_capacity))
+                block = await handle.read(min(16384, self.connection.bridge.output_capacity))
                 if block.lost_bytes:
                     raise ProtocolError("Provider process output was lost")
                 if len(block.data) > min(16384, self.connection.bridge.output_capacity):
@@ -498,10 +542,12 @@ class _Process:
                 if block.eof:
                     break
             # Codex treats exit as final output: drain before announcing it.
-            self.exit_code = await self.handle.wait()
+            self.exit_code = await handle.wait()
+            await self.release()
             await self.notify("process/exited", {"exitCode": self.exit_code})
             self.closed = True
             await self.notify("process/closed", {})
+            self.connection.retire(self)
         except asyncio.CancelledError:
             raise
         except Exception as error:

@@ -49,6 +49,7 @@ class Model:
         self.hold = False
         self.release = asyncio.Event()
         self.tool = None
+        self.tool_requests = {1}
         self.tool_name = "exec_command"
         self.tasks = set()
         self.errors = []
@@ -69,11 +70,11 @@ class Model:
             await self.entered.put(number)
             if self.hold:
                 await self.release.wait()
-            if self.tool is not None and number == 1:
+            if self.tool is not None and number in self.tool_requests:
                 item = {
                     "type": "function_call",
-                    "id": "tool-1",
-                    "call_id": "call-1",
+                    "id": f"tool-{number}",
+                    "call_id": f"call-{number}",
                     "name": self.tool_name,
                     "arguments": json.dumps(self.tool),
                 }
@@ -354,13 +355,13 @@ def test_native_question_handler_response_reaches_next_model_request(binary, tmp
 
 
 @asynccontextmanager
-async def workspace_executor(workspace):
+async def workspace_executor(workspace, **bridge_options):
     from websockets.asyncio.server import serve
     from websockets.exceptions import ConnectionClosed
 
     from ohkit.backends.codex import CodexExecBridge, CodexExecutor
 
-    bridge = CodexExecBridge(workspace)
+    bridge = CodexExecBridge(workspace, **bridge_options)
     trace = []
     errors = []
     connections = []
@@ -490,5 +491,44 @@ def test_native_workspace_readiness_and_cancellation_keep_binding_alive(binary, 
                 assert any(frame.get("method") == "process/terminate" for frame in trace)
                 assert (await thread.run("Text only after cancellation.")).outcome == "completed"
         assert all(process.process.returncode is not None for process in workspace.processes)
+
+    asyncio.run(scenario())
+
+
+def test_native_workspace_reuses_live_capacity_across_command_runs(binary, tmp_path):
+    from examples.local_workspace import LocalWorkspace
+
+    class Workspace(LocalWorkspace):
+        def __init__(self):
+            super().__init__(tmp_path, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+            self.processes = []
+
+        async def start_process(self, request):
+            process = await super().start_process(request)
+            self.processes.append(process)
+            return process
+
+    async def scenario():
+        workspace = Workspace()
+        async with (
+            fixture(binary, tmp_path) as (model, options),
+            workspace_executor(workspace, handle_limit=1, replay_limit=1) as (endpoint, trace, connections),
+            Codex(options=options) as backend,
+        ):
+            model.tool = {"cmd": "printf retained-output", "yield_time_ms": 1000}
+            model.tool_requests = {1, 3, 5}
+            thread = await backend.new_thread(
+                cwd=str(tmp_path),
+                executor=endpoint,
+                options=CodexThreadOptions(sandbox="danger-full-access", approval_policy="never"),
+            )
+            for index in range(3):
+                result = await thread.run(f"Execute command {index}.")
+                assert result.outcome == "completed", (result, trace)
+                assert len(workspace.processes) == index + 1
+                assert all(handle.close_task is not None and handle.close_task.done() for handle in workspace.processes)
+                outputs = [item for item in model.calls[-1]["input"] if item.get("type") == "function_call_output"]
+                assert "retained-output" in json.dumps(outputs), outputs
+            assert len(connections) == 1
 
     asyncio.run(scenario())

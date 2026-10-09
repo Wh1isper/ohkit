@@ -56,7 +56,9 @@ Native app-server path strings and executor file URIs are different representati
 
 Codex remains responsible for parsing and applying its patch language; the selected filesystem performs the underlying reads and writes. Native process requests carry argv, environment policy, stdin/TTY requirements, and execution restrictions. The bridge projects [Workspace files and processes](../workspace/01-files-processes.md) into native responses, output notifications, and retained reads.
 
-The adapter preserves independent process exit and output closure. If native tool result collection treats exit as output completion, the bridge publishes terminal process evidence only after draining the output it promises to deliver. Sequence numbers and retention remain native-adapter details, not public Workspace IDs.
+The adapter preserves independent process exit and output closure. If native tool result collection treats exit as output completion, the bridge publishes terminal process evidence only after draining the output it promises to deliver. It settles completed provider handles before terminal notifications and frees live-process capacity independently of retained terminal output. Natural completion and binding shutdown share one resource-release operation; cleanup failure is not successful closure.
+
+Completed output and status have bounded replay retention, separate from live handles and in-flight requests. Expired process reads fail explicitly; retained observations do not keep a provider resource alive. Process IDs remain single-use throughout the connection, even after replay eviction or an uncertain launch failure. Connection-lifetime identity tombstones and write IDs retained with each process prevent duplicate effects; their metadata can grow without retaining unbounded output or imposing a cumulative command/write quota. The application owns connection lifetime. Sequence numbers and retention remain native-adapter details, not public Workspace IDs.
 
 ## Supported-Mode Boundary
 
