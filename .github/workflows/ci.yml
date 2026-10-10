@@ -33,6 +33,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: make check-all
+      - run: make claude-native-test
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

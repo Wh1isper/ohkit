@@ -12,7 +12,11 @@ A native ACP session maps to a Thread. A `session/prompt` request establishes fo
 
 Stable ACP has no general active-steering primitive with ohkit's accepted-input contract. Steering is unavailable by default. A negotiated extension can enable it only with explicit semantics and verification; a concurrent or later prompt is not an implicit substitute.
 
-History load/resume and fork are used only when supported by the selected agent and protocol capability. Replayed history is distinguished from new Run output. Permission requests route to the caller's typed handler, preserving the offered choice and scope.
+The adapter owns one agent subprocess and SDK connection per live Thread. History continuation uses stable `session/resume`, or `session/load` when only load is advertised. Replayed history is not new Run output. `session/fork` remains unstable in the supported SDK and is unavailable even when advertised. The initial adapter accepts text inputs only.
+
+Permission requests route to the caller's typed handler. ACP choices use native kind and scope, retaining the exact option ID, label, and `allow_once`, `allow_always`, `reject_once`, or `reject_always` value; an `always` hint does not invent a known session or persistent scope. Only an offered choice can be returned. Missing, failed, or cancelled handlers return the native cancelled outcome.
+
+An ACP prompt has no separate acceptance receipt. Entering a Run admits its one prompt locally; the final prompt response supplies its outcome. Native rejection produces a failed result, while lost response evidence produces unknown. All stable stop reasons other than `cancelled` represent normal native termination and remain available as the result's native status; this does not assert goal fulfillment.
 
 ## Workspace Mapping
 

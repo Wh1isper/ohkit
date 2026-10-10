@@ -9,4 +9,4 @@ Backends adapt native harness behavior to [execution](../execution/README.md) an
 | [ACP](02-acp.md)                   | Stable ACP conversation control and client callbacks             |
 | [Claude](03-claude.md)             | Agent SDK lifecycle boundary and explicit Workspace exclusion    |
 
-Codex app-server control is implemented; its Workspace bridge, ACP, and Claude remain design targets. Availability follows implemented and verified behavior, not this catalog. The [Codex user guide](../../docs/codex.md) owns the tested native baseline and available control modes.
+Codex control and its hosted Workspace bridge, stable ACP with optional Workspace callbacks, and ordinary Claude execution are implemented. Availability follows verified behavior, not this catalog. The [Codex](../../docs/codex.md), [ACP](../../docs/acp.md), and [Claude](../../docs/claude.md) user guides own compatibility baselines and available modes.

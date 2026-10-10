@@ -19,7 +19,8 @@ def check_wheel(path: Path, version: str) -> None:
         assert "ohkit/py.typed" in names
         assert "ohkit/__init__.py" in names
         assert "ohkit/execution.py" in names
-        assert "ohkit/backends/codex/backend.py" in names
+        for backend in ("codex", "acp", "claude"):
+            assert f"ohkit/backends/{backend}/backend.py" in names
         assert prefix + "licenses/LICENSE" in names
         assert all(name.startswith(("ohkit/", prefix)) for name in names), names
         metadata = email.message_from_bytes(archive.read(prefix + "METADATA"))
@@ -34,7 +35,12 @@ def check_wheel(path: Path, version: str) -> None:
         license_text = archive.read(prefix + "licenses/LICENSE").decode()
         assert license_text.startswith("MIT License\n")
         assert "Copyright (c) 2026 Converge AI" in license_text
-        assert metadata.get_all("Requires-Dist", []) == ["pydantic<3,>=2.12", "websockets<16,>=15"]
+        assert metadata.get_all("Requires-Dist", []) == [
+            "agent-client-protocol<0.13,>=0.12.1",
+            "claude-agent-sdk<0.3,>=0.2.165",
+            "pydantic<3,>=2.12",
+            "websockets<16,>=15",
+        ]
         assert metadata.get_all("Provides-Extra", []) == []
         assert "Root-Is-Purelib: true" in archive.read(prefix + "WHEEL").decode()
 
@@ -74,10 +80,14 @@ def check_install(wheel: Path, work: Path, version: str) -> None:
             f"""import ohkit
 from ohkit import Thread, Run, NativeData
 from ohkit.backends.codex import Codex
+from ohkit.backends.acp import ACP, ACPOptions
+from ohkit.backends.claude import Claude
 from websockets.asyncio.client import connect
 assert ohkit.__version__ == {version!r}
 assert callable(connect)
 assert Codex().capabilities.steer
+assert ACP(options=ACPOptions(command=('agent',)))
+assert Claude().capabilities.resume and not Claude().capabilities.steer
 assert NativeData('codex', '{{"ok":true}}').decode() == {{'ok': True}}
 print(ohkit.__version__)
 """,
@@ -101,7 +111,7 @@ def main() -> None:
         work = Path(temporary)
         check_wheel(rebuild_sdist(sdist, work, version), version)
         check_install(wheel, work, version)
-    print(f"Validated ohkit {version}: wheel, sdist rebuild, isolated install with default WebSocket transport")
+    print(f"Validated ohkit {version}: wheel, sdist rebuild, isolated install with all backend imports")
 
 
 if __name__ == "__main__":
