@@ -7,7 +7,7 @@ description: Native Codex app-server control, transport ownership, options, and 
 
 `ohkit.backends.codex.Codex` is a concrete asynchronous app-server v2 control adapter. It creates native Threads, starts foreground Runs, steers the expected active Turn, interrupts work, resumes/forks native history, streams observations, and answers typed command/file/permission approvals and user questions.
 
-Codex owns the agent loop, tools, filesystem access, provider configuration, credentials, sandbox enforcement, and native history. This backend does not supply a Workspace or executor bridge, emulate Codex tools, or redirect file/process operations into the application. `capabilities.workspace` is false. Other shared capability flags describe implemented control features, not a guarantee that a particular native configuration will emit every interaction.
+Codex owns the agent loop, tool semantics, provider configuration, credentials, and native history. By default it also owns file/process execution. For explicitly selected external execution, `CodexExecBridge` delegates file/process operations to an application-supplied Workspace without emulating Codex tools or patches. The backend advertises Workspace support; ordinary native Threads have `workspace=False`, while external Threads have `workspace=True` and no resume/fork capability. Capability flags describe implemented features, not a guarantee that every native configuration supports them. See [Workspace](workspace.md) for the supported mode and authority boundary.
 
 ## Owned stdio process
 
@@ -46,6 +46,12 @@ The adapter owns only its WebSocket connection, not the server/listener or any e
 
 `history_scope` is required for remote control. Use a stable non-secret identity for the native service and history storage, not a token or credentialed URL. Local references use the absolute effective `CODEX_HOME` by default. A reference's scope must match the backend; references contain no credentials and grant no access.
 
+## Application-hosted execution
+
+Pass `executor=CodexExecutor(...)` to `new_thread`, with explicit target cwd and `CodexThreadOptions(sandbox="danger-full-access")`. Control may still use stdio or a borrowed WebSocket service. The application hosts and authorizes `CodexExecBridge.serve`; the backend neither creates a hidden listener nor owns the provider. Native readiness and exact selection are checked before returning the Thread.
+
+The current native resume/fork requests cannot bind an external executor before startup I/O. Those external operations are rejected, not downgraded to local execution. Registration also affects shared native defaults: use a dedicated app-server and do not reopen external history through the ordinary host-history API. [Workspace](workspace.md#codex-binding) owns these limits; the [hosting example](examples/application-hosted-executor.md) is runnable checkout code.
+
 ## Operational limits
 
 `event_capacity` bounds retained Run observations (default 256). `request_timeout` bounds native request acknowledgement waits; losing an acknowledgement after possible dispatch makes the connection unavailable and raises `UnknownOutcomeError`. `cleanup_timeout` bounds Run interaction/termination settlement and process/connection close operations. A timeout is not proof that native side effects did not occur.
@@ -60,7 +66,7 @@ Validation has distinct layers:
 
 - Controlled localhost WebSocket protocol tests exercise notification-before-response admission, pending steering/interrupt acknowledgements, lost transport, stale/reused interaction IDs, cleanup deadlines, event pressure, malformed terminal data, and foreground attribution. These peers are not native Codex.
 - Controlled real stdio child tests verify owned process reaping, early-exit interruption, and death during uncertain submission without replay.
-- Opt-in public-API tests run the actual verified Codex 0.162.0 executable with isolated `HOME`/`CODEX_HOME` and a deterministic loopback Responses SSE model endpoint. They cover streaming/usage, history fork/reopen, steer followed by normal completion and a separate subsequent Run, interruption, real command approval non-approval/accept with a temporary-file effect, typed questions, and borrowed native WebSocket service survival across client closure. They make no paid external model calls and inherit no ambient model credentials.
+- Opt-in public-API tests run the actual verified Codex 0.162.0 executable with isolated `HOME`/`CODEX_HOME` and a deterministic loopback Responses SSE model endpoint. They cover streaming/usage, history fork/reopen, steer followed by normal completion and a separate subsequent Run, interruption, real command approval non-approval/accept with a temporary-file effect, typed questions, and borrowed native WebSocket service survival across client closure. They also cover real Workspace instruction discovery, file read/patch/write, command effects and final output through both control transports, endpoint reuse, event-gated preparation, and process cancellation followed by another Run on the same binding. They make no paid external model calls and inherit no ambient model credentials.
 
 Run native tests explicitly:
 

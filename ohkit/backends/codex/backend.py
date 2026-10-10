@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
+from dataclasses import replace
 from types import TracebackType
 from typing import Literal
 from uuid import uuid4
@@ -50,7 +51,7 @@ from ._rpc import RPC, RequestID
 from ._transport import Stdio, WebSocket, local_scope
 from ._version import CODEX_VERSION
 from ._wire import decode, encode
-from .options import CodexOptions, CodexThreadOptions
+from .options import CodexExecutor, CodexOptions, CodexThreadOptions
 
 CAPABILITIES = Capabilities(steer=True, resume=True, fork=True, approvals=True, questions=True)
 type Delta = (
@@ -90,11 +91,11 @@ def _input(input: Input) -> list[NativeInput]:
 class Codex:
     """Own a stdio app-server, or own a connection to a borrowed remote service.
 
-    Native configuration and cwd refer to the app-server host. No supplied
-    Workspace or executor bridge is implemented by this control backend.
+    Native configuration stays on the app-server host. An optional executor
+    endpoint selects application-hosted Workspace I/O independently of control.
     """
 
-    capabilities = CAPABILITIES
+    capabilities = replace(CAPABILITIES, workspace=True)
     tested_native_version = CODEX_VERSION
 
     def __init__(self, *, options: CodexOptions | None = None) -> None:
@@ -106,6 +107,9 @@ class Codex:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self._scope = local_scope(self.options)
+        self._executors: dict[CodexExecutor, str] = {}
+        self._executor_lock = asyncio.Lock()
+        self._uses_executor = False
 
     async def __aenter__(self) -> Codex:
         if self._entered or self._closed:
@@ -153,7 +157,7 @@ class Codex:
 
         task.add_done_callback(finished)
 
-    def _attach(self, response: wire.Thread) -> Thread:
+    def _attach(self, response: wire.Thread, *, external: bool = False) -> Thread:
         # An admitted history request may return after backend close began.
         self._connection()
         identity = response.id
@@ -163,13 +167,64 @@ class Codex:
         if previous is not None:
             previous.thread._available = False
         binding = _Binding(self, identity)
-        thread = Thread(ThreadRef("codex", identity, self._scope), CAPABILITIES, binding, self.options.event_capacity)
+        capabilities = replace(CAPABILITIES, workspace=True, resume=False, fork=False) if external else CAPABILITIES
+        thread = Thread(ThreadRef("codex", identity, self._scope), capabilities, binding, self.options.event_capacity)
         binding.thread = thread
         self._threads[identity] = binding
         return thread
 
-    async def new_thread(self, *, cwd: str | None = None, options: CodexThreadOptions | None = None) -> Thread:
+    async def _ready(self, identity: str, timeout: float) -> None:
+        try:
+            async with asyncio.timeout(timeout):
+                while True:
+                    response = await self._connection().environment_status(
+                        wire.EnvironmentStatusParams(environment_id=identity)
+                    )
+                    if response.status == "ready":
+                        return
+                    if response.status != "pending":
+                        raise UnavailableError(f"Executor is {response.status}")
+                    # Poll native evidence; elapsed time is never a readiness signal.
+                    await asyncio.sleep(0.05)
+        except TimeoutError:
+            raise UnavailableError("Executor readiness deadline expired") from None
+
+    async def _executor(self, endpoint: CodexExecutor) -> str:
+        # Native registration affects shared app-server defaults even if its reply is lost.
+        self._uses_executor = True
+        async with self._executor_lock:
+            identity = self._executors.get(endpoint)
+            if identity is None:
+                identity = "ohkit_" + uuid4().hex
+                await self._connection().environment_add(
+                    wire.EnvironmentAddParams(
+                        environment_id=identity,
+                        exec_server_url=endpoint.url,
+                        auth_bearer_token=endpoint.bearer_token,
+                        connect_timeout_ms=max(1, int(endpoint.readiness_timeout * 1000)),
+                    )
+                )
+                self._executors[endpoint] = identity
+            await self._ready(identity, endpoint.readiness_timeout)
+            return identity
+
+    async def new_thread(
+        self,
+        *,
+        cwd: str | None = None,
+        options: CodexThreadOptions | None = None,
+        executor: CodexExecutor | None = None,
+    ) -> Thread:
+        if executor is None and self._uses_executor:
+            raise UnsupportedError("Choose an explicit executor after external environment registration")
         options = options or CodexThreadOptions()
+        environment: str | None = None
+        if executor is not None:
+            if options.sandbox != "danger-full-access":
+                raise UnsupportedError("The Workspace executor requires explicit danger-full-access mode")
+            if cwd is None:
+                raise ValueError("An external executor requires an explicit target cwd")
+            environment = await self._executor(executor)
         response = await self._connection().thread_start(
             wire.ThreadStartParams(
                 model=options.model,
@@ -179,9 +234,24 @@ class Codex:
                 base_instructions=options.base_instructions,
                 developer_instructions=options.developer_instructions,
                 cwd=cwd,
+                environments=[wire.TurnEnvironmentParams(environment_id=environment, cwd=cwd)]
+                if environment is not None and cwd is not None
+                else None,
+                config={"features.deferred_executor": False, "features.shell_snapshot": False} if executor else None,
             )
         )
-        return self._attach(response.thread)
+        if environment is not None:
+            selected = response.thread.environments
+            if (
+                not selected
+                or len(selected) != 1
+                or selected[0].environment_id != environment
+                or selected[0].cwd != cwd
+            ):
+                raise ProtocolError("Native Thread did not acknowledge the selected executor and cwd")
+            assert executor is not None
+            await self._ready(environment, executor.readiness_timeout)
+        return self._attach(response.thread, external=executor is not None)
 
     def _reference(self, ref: ThreadRef) -> None:
         if ref.backend != "codex" or ref.scope != self._scope:
@@ -191,8 +261,15 @@ class Codex:
             raise BusyError("Cannot reopen native history while this backend owns an active Run")
 
     async def resume(
-        self, ref: ThreadRef, *, cwd: str | None = None, options: CodexThreadOptions | None = None
+        self,
+        ref: ThreadRef,
+        *,
+        cwd: str | None = None,
+        options: CodexThreadOptions | None = None,
+        executor: CodexExecutor | None = None,
     ) -> Thread:
+        if executor is not None or self._uses_executor:
+            raise UnsupportedError("Codex cannot select an external executor during history resume/fork")
         self._reference(ref)
         options = options or CodexThreadOptions()
         response = await self._connection().thread_resume(
@@ -210,8 +287,15 @@ class Codex:
         return self._attach(response.thread)
 
     async def fork(
-        self, ref: ThreadRef, *, cwd: str | None = None, options: CodexThreadOptions | None = None
+        self,
+        ref: ThreadRef,
+        *,
+        cwd: str | None = None,
+        options: CodexThreadOptions | None = None,
+        executor: CodexExecutor | None = None,
     ) -> Thread:
+        if executor is not None or self._uses_executor:
+            raise UnsupportedError("Codex cannot select an external executor during history resume/fork")
         self._reference(ref)
         options = options or CodexThreadOptions()
         response = await self._connection().thread_fork(

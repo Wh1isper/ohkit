@@ -49,6 +49,7 @@ class Model:
         self.hold = False
         self.release = asyncio.Event()
         self.tool = None
+        self.tool_requests = {1}
         self.tool_name = "exec_command"
         self.tasks = set()
         self.errors = []
@@ -69,11 +70,11 @@ class Model:
             await self.entered.put(number)
             if self.hold:
                 await self.release.wait()
-            if self.tool is not None and number == 1:
+            if self.tool is not None and number in self.tool_requests:
                 item = {
                     "type": "function_call",
-                    "id": "tool-1",
-                    "call_id": "call-1",
+                    "id": f"tool-{number}",
+                    "call_id": f"call-{number}",
                     "name": self.tool_name,
                     "arguments": json.dumps(self.tool),
                 }
@@ -349,5 +350,185 @@ def test_native_question_handler_response_reaches_next_model_request(binary, tmp
                     item.get("type") == "function_call_output" and '"A"' in item.get("output", "")
                     for item in model.calls[1]["input"]
                 ), model.calls[1]["input"]
+
+    asyncio.run(scenario())
+
+
+@asynccontextmanager
+async def workspace_executor(workspace, **bridge_options):
+    from websockets.asyncio.server import serve
+    from websockets.exceptions import ConnectionClosed
+
+    from ohkit.backends.codex import CodexExecBridge, CodexExecutor
+
+    bridge = CodexExecBridge(workspace, **bridge_options)
+    trace = []
+    errors = []
+    connections = []
+
+    async def handler(connection):
+        connections.append(connection)
+        assert connection.request.headers["Authorization"] == "Bearer isolated-test"
+
+        async def messages():
+            async for text in connection:
+                trace.append(json.loads(text))
+                yield text
+
+        async def send(text):
+            trace.append({"response": json.loads(text)})
+            await connection.send(text)
+
+        try:
+            await bridge.serve(messages(), send)
+        except ConnectionClosed:
+            pass  # Native stdio shutdown ends its executor socket without a close frame.
+        except Exception as error:
+            errors.append(error)
+
+    async with serve(handler, "127.0.0.1", 0) as server:
+        endpoint = CodexExecutor(
+            f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/project", bearer_token="isolated-test"
+        )
+        yield endpoint, trace, connections
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("control", ["stdio", "websocket"])
+@pytest.mark.parametrize("operation", ["patch", "command"])
+def test_native_workspace_startup_patch_and_real_process(binary, tmp_path, control, operation):
+    from contextlib import AsyncExitStack
+
+    from examples.local_workspace import LocalWorkspace
+
+    async def scenario():
+        root = tmp_path / "target"
+        root.mkdir()
+        (root / "AGENTS.md").write_text("Workspace instruction marker: OHKIT_TARGET_AGENTS.\n")
+        (root / "note.txt").write_text("before\n")
+        workspace = LocalWorkspace(root, env={"PATH": "/usr/bin:/bin", "HOME": str(root)})
+        async with AsyncExitStack() as stack:
+            model, options = await stack.enter_async_context(fixture(binary, tmp_path))
+            endpoint, trace, connections = await stack.enter_async_context(workspace_executor(workspace))
+            if control == "websocket":
+                _, options = await stack.enter_async_context(borrowed_service(binary, options))
+            if operation == "patch":
+                command = "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: note.txt\n@@\n-before\n+after\n*** End Patch\nPATCH"
+            else:
+                command = "printf first; printf second; printf effect > effect.txt; cat note.txt"
+            model.tool = {"cmd": command, "yield_time_ms": 1000}
+            backend = await stack.enter_async_context(Codex(options=options))
+            thread = await backend.new_thread(
+                cwd=str(root),
+                executor=endpoint,
+                options=CodexThreadOptions(sandbox="danger-full-access", approval_policy="never"),
+            )
+            result = await thread.run("Perform the controlled workspace operation.")
+            assert result.outcome == "completed", (result, trace)
+            assert "OHKIT_TARGET_AGENTS" in json.dumps(model.calls[0]["input"]), model.calls[0]
+            if operation == "patch":
+                assert (root / "note.txt").read_text() == "after\n", (model.calls, trace)
+                assert any(frame.get("method") == "fs/writeFile" for frame in trace)
+            else:
+                assert (root / "effect.txt").read_text() == "effect", (model.calls, trace)
+                output = [item for item in model.calls[1]["input"] if item.get("type") == "function_call_output"]
+                assert "firstsecondbefore" in json.dumps(output), output
+                assert any(frame.get("method") == "process/start" for frame in trace)
+            # A second Thread reuses registration; connected notifications need not replay.
+            other = await backend.new_thread(
+                cwd=str(root), executor=endpoint, options=CodexThreadOptions(sandbox="danger-full-access")
+            )
+            assert other.ref != thread.ref and len(connections) == 1
+            assert (await other.run("Text only.")).outcome == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_native_workspace_readiness_and_cancellation_keep_binding_alive(binary, tmp_path):
+    from examples.local_workspace import LocalWorkspace
+
+    class Workspace(LocalWorkspace):
+        def __init__(self):
+            super().__init__(tmp_path, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+            self.describing = asyncio.Event()
+            self.describe_release = asyncio.Event()
+            self.started = asyncio.Event()
+            self.processes = []
+
+        async def describe(self):
+            self.describing.set()
+            await self.describe_release.wait()
+            return await super().describe()
+
+        async def start_process(self, request):
+            process = await super().start_process(request)
+            self.processes.append(process)
+            self.started.set()
+            return process
+
+    async def scenario():
+        workspace = Workspace()
+        async with fixture(binary, tmp_path) as (model, options), workspace_executor(workspace) as (endpoint, trace, _):
+            model.tool = {"cmd": "printf waiting; sleep 60", "yield_time_ms": 1000}
+            async with Codex(options=options) as backend:
+                creation = asyncio.create_task(
+                    backend.new_thread(
+                        cwd=str(tmp_path),
+                        executor=endpoint,
+                        options=CodexThreadOptions(sandbox="danger-full-access", approval_policy="never"),
+                    )
+                )
+                await workspace.describing.wait()
+                assert not creation.done() and not model.calls
+                workspace.describe_release.set()
+                thread = await creation
+                async with thread.stream("Run the controlled long command.") as run:
+                    await workspace.started.wait()
+                    await run.cancel()
+                    async for _ in run:
+                        pass
+                    assert (await run.result()).outcome == "cancelled"
+                assert any(frame.get("method") == "process/terminate" for frame in trace)
+                assert (await thread.run("Text only after cancellation.")).outcome == "completed"
+        assert all(process.process.returncode is not None for process in workspace.processes)
+
+    asyncio.run(scenario())
+
+
+def test_native_workspace_reuses_live_capacity_across_command_runs(binary, tmp_path):
+    from examples.local_workspace import LocalWorkspace
+
+    class Workspace(LocalWorkspace):
+        def __init__(self):
+            super().__init__(tmp_path, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
+            self.processes = []
+
+        async def start_process(self, request):
+            process = await super().start_process(request)
+            self.processes.append(process)
+            return process
+
+    async def scenario():
+        workspace = Workspace()
+        async with (
+            fixture(binary, tmp_path) as (model, options),
+            workspace_executor(workspace, handle_limit=1, replay_limit=1) as (endpoint, trace, connections),
+            Codex(options=options) as backend,
+        ):
+            model.tool = {"cmd": "printf retained-output", "yield_time_ms": 1000}
+            model.tool_requests = {1, 3, 5}
+            thread = await backend.new_thread(
+                cwd=str(tmp_path),
+                executor=endpoint,
+                options=CodexThreadOptions(sandbox="danger-full-access", approval_policy="never"),
+            )
+            for index in range(3):
+                result = await thread.run(f"Execute command {index}.")
+                assert result.outcome == "completed", (result, trace)
+                assert len(workspace.processes) == index + 1
+                assert all(handle.close_task is not None and handle.close_task.done() for handle in workspace.processes)
+                outputs = [item for item in model.calls[-1]["input"] if item.get("type") == "function_call_output"]
+                assert "retained-output" in json.dumps(outputs), outputs
+            assert len(connections) == 1
 
     asyncio.run(scenario())

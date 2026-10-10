@@ -11,6 +11,7 @@ const routes = [
   "getting-started/",
   "execution/",
   "codex/",
+  "workspace/",
   "examples/application-hosted-executor/",
   "documentation/",
   "releasing/",
@@ -38,16 +39,18 @@ test("search index is exported with documentation content", () => {
   assert.match(text, /Workspace/);
 });
 
-test("implemented control and unimplemented Workspace boundaries remain visible", () => {
+test("implemented execution and external Workspace limits remain visible", () => {
   assert.match(read("index.html"), /version metadata only/);
   assert.match(read("getting-started/index.html"), /Earlier published bootstrap releases/);
   assert.match(read("getting-started/index.html"), /from this checkout/);
   const baseline = JSON.parse(readFileSync(new URL("../../protocol/codex/manifest.json", import.meta.url), "utf8"));
   assert.ok(read("codex/index.html").includes(`Codex ${baseline.version}`));
-  assert.match(read("codex/index.html"), /does not supply a Workspace or executor bridge/);
+  assert.match(read("codex/index.html"), /application-supplied Workspace/);
+  assert.match(read("workspace/index.html"), /External history resume\/fork is unsupported/);
+  assert.match(read("workspace/index.html"), /full authority/);
   assert.match(read("execution/index.html"), /UnknownOutcomeError|unknown result/);
   const example = read("examples/application-hosted-executor/index.html");
-  assert.match(example, /Design example, not a shipped API/);
+  assert.match(example, /executable authenticated loopback host/);
   assert.match(example, /View Mermaid source/);
   assert.match(example, /Expand/);
 });

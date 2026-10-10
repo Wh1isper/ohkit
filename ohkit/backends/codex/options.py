@@ -40,3 +40,23 @@ class CodexThreadOptions:
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
     base_instructions: str | None = field(default=None, repr=False)
     developer_instructions: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexExecutor:
+    """An application-hosted executor reachable by app-server, not a Workspace.
+
+    The host authenticates the peer and chooses its Workspace before serve().
+    Registering this endpoint does not give ohkit ownership of that service.
+    """
+
+    url: str = field(repr=False)
+    bearer_token: str | None = field(default=None, repr=False)
+    readiness_timeout: float = 30.0
+
+    def __post_init__(self) -> None:
+        endpoint = urlsplit(self.url)
+        if endpoint.scheme not in ("ws", "wss") or not endpoint.hostname or endpoint.username or endpoint.password:
+            raise ValueError("Use a ws/wss executor endpoint without embedded credentials")
+        if self.readiness_timeout <= 0:
+            raise ValueError("Executor readiness timeout must be positive")

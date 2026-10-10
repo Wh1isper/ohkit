@@ -13,6 +13,12 @@ description: Reproduce private wire models, test native upstream regressions, an
 
 The generator version is pinned in `pyproject.toml` and `uv.lock`; generation flags live only in the maintenance script. Do not edit generated files or patch individual wire fields. Add a needed native method/type to the selection maps and regenerate. The current generator reports unsupported Rust integer format annotations (`uint`, `uint16`, `uint32`, `uint64`); JSON Schema numeric bounds are retained, but Rust-width annotations alone are not range validators. This is not a complete JSON Schema validation engine.
 
+## Executor protocol maintenance
+
+The same native baseline covers external execution, but app-server schema export does **not** export exec-server messages. `ohkit/backends/codex/_exec_wire.py` is a deliberately small hand-maintained ingress model set, pinned to [exec-server protocol source](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/exec-server-protocol/src/protocol.rs). It rejects unknown operation requirements and preserves native aliases. Generated control models separately include `environment/add` and `environment/status`; do not add executor messages to the control ServerRequest map.
+
+During a baseline upgrade, inspect executor defaults and behavior as well as shapes: file URI conversion, follow/recursive/force defaults, copy semantics, missing-file codes, environment policy, process output/exit/closed ordering, write deduplication, and optional capability requirements. Update the selected ingress models and real provider tests together. The bridge does not advertise unimplemented optional features or recover live executor sessions. Its [supported modes](workspace.md) remain narrower than the full native protocol.
+
 ## Routine checks
 
 ```bash
@@ -41,7 +47,7 @@ The workflow fails for a regression or an inconclusive **check**, not for a new 
 
 ### What this evidence does and does not establish
 
-The native suite exercises initialization, thread start/resume/fork, streaming and usage, active steering consumed by a subsequent model request, interrupt and terminal settlement, real command accept/cancel effects, typed questions, and stdio/WebSocket ownership. It uses a deterministic localhost model, not authenticated live-provider behavior. It is a regression gate for these paths, **not a proof that every upstream message or configuration is compatible**. Native file/permission approval variants and other unexercised features still require targeted tests and source review when changed.
+The native suite exercises initialization, thread start/resume/fork, streaming and usage, active steering consumed by a subsequent model request, interrupt and terminal settlement, real command accept/cancel effects, typed questions, and stdio/WebSocket ownership. It also exercises selected Workspace startup instructions, real file patching and commands, external readiness, cancellation, and endpoint reuse. It uses a deterministic localhost model, not authenticated live-provider behavior. It is a regression gate for these paths, **not a proof that every upstream message or configuration is compatible**. Native file/permission approval variants and other unexercised features still require targeted tests and source review when changed.
 
 The official [app-server documentation](https://developers.openai.com/codex/app-server) describes generated schemas as specific to the executable version and gates experimental fields through `experimentalApi`; it does not make our strict consumer automatically forward-compatible. Optional fields, enum/union additions, removed fields, and changed runtime ordering have different effects. In particular, an added enum value may fail an existing strict decoder even while ordinary native tests pass. Schema diff therefore remains informational review evidence, never an automatic compatibility verdict. Do not build a second general-purpose schema compatibility engine or accept unknown decision/terminal variants merely to obtain a green check.
 

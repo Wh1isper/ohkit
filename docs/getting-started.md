@@ -65,4 +65,4 @@ Consume a Run's stream once before calling `result()`. For result-only work, `th
 - [Execution](execution.md): ownership, steering, cancellation, events, and handlers.
 - [Codex](codex.md): options, native policy, transport lifetime, and compatibility evidence.
 - [Runnable example](https://github.com/Wh1isper/ohkit/blob/main/examples/codex.py): streaming with an explicit non-approval handler and history continuation.
-- [Application-hosted executor](examples/application-hosted-executor.md): conceptual future Workspace integration, not an implemented executor bridge.
+- [Workspace](workspace.md) and [application-hosted executor](examples/application-hosted-executor.md): typed provider I/O and a runnable authenticated bridge for new Codex Threads.
