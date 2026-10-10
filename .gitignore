@@ -12,7 +12,7 @@ test-results/
 build/
 dist/
 site/
-website/node_modules/
+node_modules/
 website/.next/
 website/.source/
 website/out/

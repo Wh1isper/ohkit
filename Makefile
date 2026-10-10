@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve codex-generate codex-check codex-native-test codex-upstream-check claude-native-test
+.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve codex-generate codex-check codex-native-test codex-upstream-check claude-native-test acp-native-test installed-test
 
 DOCS_PORT ?= 3000
 
@@ -58,6 +58,14 @@ codex-native-test: ## Exercise the pinned real Codex against a loopback model
 
 claude-native-test: ## Exercise the SDK-bundled Claude against a loopback model
 	OHKIT_TEST_NATIVE=1 uv run --locked pytest tests/test_claude_native.py -q --junitxml=test-results/claude-native.xml
+
+acp-native-test: ## Exercise a locked third-party ACP agent against a loopback model
+	npm ci --prefix tests/fixtures/acp --ignore-scripts --no-audit --no-fund
+	OHKIT_TEST_ACP_NATIVE=1 uv run --locked pytest tests/test_acp_native.py -q --junitxml=test-results/acp-native.xml
+
+installed-test: build ## Run native suites against an isolated wheel installation
+	npm ci --prefix tests/fixtures/acp --ignore-scripts --no-audit --no-fund
+	uv run --locked python scripts/check_installed.py dist/ohkit-0.0.0-py3-none-any.whl
 
 codex-upstream-check: ## Report latest stable Codex version/schema drift (network)
 	uv run --locked python scripts/codex_protocol.py check-upstream

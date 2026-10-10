@@ -46,3 +46,14 @@ uv run --locked python scripts/check_distribution.py
 ```
 
 Repeat with a stable version from a fresh copy. This tests packaging only and publishes nothing.
+
+For executable consumption checks, use `make installed-test` in the development checkout, or test a rehearsed wheel directly:
+
+```bash
+npm ci --prefix tests/fixtures/acp --ignore-scripts --no-audit --no-fund
+uv run --locked python scripts/check_installed.py /path/to/ohkit-0.1.0-py3-none-any.whl
+```
+
+This creates a temporary consumer environment, installs the wheel and test runner with normally resolved runtime dependencies, and copies only tests, examples, and fixture tooling—not the `ohkit/` source. A test-session assertion verifies imports come from that environment. It exercises Codex and Claude native suites, the locked third-party ACP agent, and deterministic ACP callback/error scenarios. Node.js 24 is needed for the ACP fixture; no production model credentials are used. `OHKIT_CODEX_BINARY` can point to an already verified binary of the documented baseline. Results are written to `test-results/installed-native.xml`.
+
+Before the first runtime release, ensure release notes describe all three backends, their actual capability limits, and the difference from the metadata-only bootstrap. Confirm the private security-reporting contact and maintainer metadata. Successful local rehearsal establishes artifact readiness; select the final reviewed commit and verify its CI before tagging.

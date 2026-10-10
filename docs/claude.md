@@ -38,6 +38,14 @@ This preserves history, not live processes, terminal handles, pending approvals,
 
 See [history and workspace continuation](continuation.md#claude-native-resume-forkresume-or-selected-handoff) for changed-cwd resume, explicit SDK fork/resume, and native transcript stores. Those paths preserve history; changing cwd does not guarantee removal of old project instructions.
 
+For a runnable streaming example:
+
+```bash
+uv run python examples/claude.py --cwd /path/to/project
+```
+
+It enables only native Read/Glob/Grep tools and declines permission requests reaching its handler. Native policy remains authoritative; this is not a sandbox. Ctrl-C stops the application and settles its active stream.
+
 ## Completion and control
 
 The adapter sends exactly one initial input through an asynchronous iterable and drains `receive_messages()` to EOF. It does not use the first `ResultMessage` as a Run-completion shortcut. The SDK owns native background-task accounting, session-state handling, and input closure. Native follow-up Turns can therefore remain inside the same Run. The result is published after SDK cleanup.

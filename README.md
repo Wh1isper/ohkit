@@ -55,4 +55,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and validation rules, [D
 
 ## License
 
-[MIT License](LICENSE).
+Original ohkit code is under the [MIT License](LICENSE). Generated Codex protocol code also carries Apache-2.0 terms; see [third-party notices](THIRD_PARTY_NOTICES.md). The distribution's license expression is `MIT AND Apache-2.0`.

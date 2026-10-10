@@ -33,7 +33,6 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: make check-all
-      - run: make claude-native-test
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,7 +42,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  codex-native:
+  installed-native:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -58,13 +57,16 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: make codex-native-test
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: make installed-test
       - name: Upload native test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codex-native-results
-          path: test-results/codex-native.xml
+          name: installed-native-results
+          path: test-results/installed-native.xml
           if-no-files-found: ignore
           retention-days: 7
 

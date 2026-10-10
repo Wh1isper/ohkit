@@ -90,6 +90,8 @@ def test_codex_maintenance_is_read_only_scheduled_and_preserves_reports():
     artifact = job["steps"][-1]
     assert artifact["if"] == "always()"
     assert artifact["with"]["path"] == "test-results/codex-upstream/"
-    native = workflow("ci.yml")["jobs"]["codex-native"]
-    assert any(step.get("run") == "make codex-native-test" for step in native["steps"])
+    native = workflow("ci.yml")["jobs"]["installed-native"]
+    assert any(step.get("run") == "make installed-test" for step in native["steps"])
+    assert any(step.get("uses") == "actions/setup-node@v6" for step in native["steps"])
+    assert native["steps"][-1]["with"]["path"] == "test-results/installed-native.xml"
     assert "codex-check" in (ROOT / "Makefile").read_text().split("check:", 1)[-1]
