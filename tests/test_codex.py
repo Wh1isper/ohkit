@@ -1090,3 +1090,29 @@ def test_executor_mismatched_selection_is_not_an_attachment():
             assert not any(c["method"] == "turn/start" for c in peer.all_calls)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("cancel_first", [False, True])
+def test_thread_concurrent_close_waits_for_native_settlement(cancel_first):
+    async def exercise():
+        async with connected() as (peer, backend):
+            thread = await backend.new_thread()
+            async with thread.stream("work"):
+                peer.hold_interrupt = True
+                first = asyncio.create_task(thread.close())
+                interrupt = await peer.next("turn/interrupt")
+                if cancel_first:
+                    first.cancel()
+                second = asyncio.create_task(thread.close())
+                await asyncio.sleep(0)
+                premature = first.done() or second.done()
+                await peer.response(interrupt, {})
+                await peer.finish("interrupted")
+                results = await asyncio.gather(first, second, return_exceptions=True)
+                assert not premature
+                assert results[1] is None
+                assert isinstance(results[0], asyncio.CancelledError) if cancel_first else results[0] is None
+            await thread.close()
+            assert len([call for call in peer.all_calls if call["method"] == "turn/interrupt"]) == 1
+
+    asyncio.run(exercise())

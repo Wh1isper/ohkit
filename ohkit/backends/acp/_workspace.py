@@ -95,8 +95,9 @@ class WorkspaceCallbacks:
         self.output_limit = output_limit
         self.terminal_limit = terminal_limit
         self.terminals: dict[str, _Terminal] = {}
-        self.starts: set[asyncio.Task[wire.CreateTerminalResponse]] = set()
+        self.starts: set[asyncio.Task[wire.CreateTerminalResponse | None]] = set()
         self.closed = False
+        self.closing: asyncio.Task[None] | None = None
 
     async def read(self, path: str, line: int | None, limit: int | None) -> wire.ReadTextFileResponse:
         if (line is not None and line < 1) or (limit is not None and limit < 0):
@@ -126,17 +127,20 @@ class WorkspaceCallbacks:
         )
         self.starts.add(task)
         try:
-            return await asyncio.shield(task)
+            response = await asyncio.shield(task)
+            if response is None:
+                raise RequestError.invalid_params({"details": "Workspace binding closed during launch"})
+            return response
         finally:
             # Keep cancelled callbacks' pending launches owned until close.
-            if task.done():
+            if task.done() and not self.closed:
                 self.starts.discard(task)
 
-    async def _start(self, request: ProcessRequest, limit: int) -> wire.CreateTerminalResponse:
+    async def _start(self, request: ProcessRequest, limit: int) -> wire.CreateTerminalResponse | None:
         process = await self.workspace.start_process(request)
         if self.closed:
             await process.close()
-            raise RequestError.invalid_params({"details": "Workspace binding closed during launch"})
+            return None
         identity = "terminal_" + uuid4().hex
         self.terminals[identity] = _Terminal(process, limit)
         return wire.CreateTerminalResponse(terminal_id=identity)
@@ -153,13 +157,20 @@ class WorkspaceCallbacks:
         self.terminals.pop(identity, None)
 
     async def close(self) -> None:
-        self.closed = True
+        if self.closing is None:
+            self.closed = True
+            self.closing = asyncio.create_task(self._close())
+        await _settle(self.closing)
+
+    async def _close(self) -> None:
+        # Own every pre-shutdown launch, including cancelled callbacks.
+        starts = tuple(self.starts)
         results = await asyncio.gather(
             *(terminal.close() for terminal in self.terminals.values()), return_exceptions=True
         )
-        await asyncio.gather(*self.starts, return_exceptions=True)
+        start_results = await asyncio.gather(*starts, return_exceptions=True)
         self.terminals.clear()
         self.starts.clear()
-        errors = [result for result in results if isinstance(result, Exception)]
+        errors = [result for result in (*results, *start_results) if isinstance(result, Exception)]
         if errors:
             raise ExceptionGroup("ACP terminal cleanup failed", errors)

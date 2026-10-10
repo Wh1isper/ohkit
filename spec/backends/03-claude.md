@@ -14,7 +14,7 @@ History resume preserves native conversation continuity within its native scope.
 
 ## SDK Ownership and Supported Surface
 
-The adapter allocates a native session UUID and owns one SDK client/process per Run. It passes a single-message asynchronous input iterable, keeps native permission routing configured, and consumes the SDK's message stream to EOF. The SDK owns background-agent accounting, session-state interpretation, and input closure. Multiple native result messages can therefore belong to the same Run. The final result is published only after SDK disconnection; forced cleanup without complete evidence is unknown, not successful completion.
+The adapter allocates a native session UUID and owns one SDK client/process per Run. It passes a single-message asynchronous input iterable, keeps native permission routing configured, and consumes the SDK's message stream to EOF. The SDK owns background-agent accounting, session-state interpretation, and input closure. Multiple native result messages can therefore belong to the same Run. The final result is published only after SDK disconnection; forced cleanup without complete evidence is unknown, not successful completion. Once the SDK message stream ends, an outstanding interrupt acknowledgement no longer blocks settlement. The result still reflects the actual completion evidence or unknown outcome, not a fabricated successful interruption.
 
 Later Runs resume native history in a new process. Idle Threads do not retain native process resources. Creating or reopening a Thread selects history locally; the next Run validates that selection through the native executable. Native refusal is not replaced with empty history. This is history continuity, not live-process continuity.
 

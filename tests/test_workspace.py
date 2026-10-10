@@ -790,3 +790,38 @@ def test_copy_merge_preserves_source_links_and_overwrites_regular_files(tmp_path
         assert (destination / "keep").read_bytes() == b"keep"
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", [OSError, BrokenPipeError, ConnectionResetError])
+def test_stdin_write_identity_is_reserved_before_provider_effect(tmp_path, failure):
+    async def scenario():
+        workspace = ControlledWorkspace(tmp_path)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def write(data):
+            workspace.process.written.append(data)
+            entered.set()
+            await release.wait()
+            raise failure("write applied; acknowledgement unavailable")
+
+        workspace.process.write = write
+        async with client(CodexExecBridge(workspace)) as (peer, _):
+            assert "result" in await peer.call("process/start", **start_params(tmp_path))
+            first = asyncio.create_task(peer.call("process/write", processId="p", writeId="same", chunk="YQ=="))
+            await entered.wait()
+            release.set()
+            response = await first
+            repeated = await peer.call("process/write", processId="p", writeId="same", chunk="YQ==")
+            if failure is OSError:
+                assert "error" in response and "error" in repeated
+            else:
+                assert response["result"] == repeated["result"] == {"status": "stdinClosed"}
+            assert workspace.process.written == [b"a"]
+            workspace.process.exited.set()
+            await workspace.process.output.put(ProcessOutput(eof=True))
+            await completed(peer, "p")
+            after_exit = await peer.call("process/write", processId="p", writeId="same", chunk="YQ==")
+            assert after_exit == {**repeated, "id": after_exit["id"]}
+        assert workspace.process.written == [b"a"]
+
+    asyncio.run(scenario())

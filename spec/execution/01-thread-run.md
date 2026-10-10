@@ -40,7 +40,9 @@ Cancellation is a request to stop the active logical work, not observed exit. Re
 
 Leaving a stream early requests cancellation and settles or reports failure of Run cleanup. It does not silently detach foreground work. Native request routing stays alive long enough to process cancellation and cleanup callbacks. If termination cannot be established, the caller receives an unknown outcome or cleanup error, not a false cancelled result.
 
-A lost connection or unresolved cleanup makes the affected execution owner unavailable for new Runs until it is explicitly re-established. Cleanup errors retain any already observed native result as evidence; they do not erase it or imply rollback. Closing a backend closes its owned live Threads and resources. Borrowed providers and caller-owned native services are not destroyed.
+A lost connection or unresolved cleanup makes the affected execution owner unavailable for new Runs until it is explicitly re-established. Cleanup errors retain any already observed native result as evidence; they do not erase it or imply rollback. Closing a Thread stops new Run admission before awaiting cleanup. Concurrent and repeated close calls observe the same cleanup completion or failure; cancelling one waiter does not abandon the owned cleanup. Already admitted submission remains owned through shutdown.
+
+Closing a backend stops admission on all its live Threads before waiting for creation or cleanup, while keeping native routing available for already admitted work. It closes its owned live Threads and resources. Borrowed providers and caller-owned native services are not destroyed.
 
 ## Continuation and Fork
 
