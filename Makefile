@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve codex-generate codex-check codex-native-test codex-upstream-check
+.PHONY: help install format lint typecheck deps-check test build dist-check check check-all verify workflow-check automation-test docs-build docs-serve codex-generate codex-check codex-native-test codex-upstream-check claude-native-test
 
 DOCS_PORT ?= 3000
 
@@ -55,6 +55,9 @@ codex-check: ## Check snapshot integrity and byte-identical wire generation (off
 
 codex-native-test: ## Exercise the pinned real Codex against a loopback model
 	OHKIT_TEST_NATIVE=1 uv run --locked pytest tests/test_codex_native.py -q --junitxml=test-results/codex-native.xml
+
+claude-native-test: ## Exercise the SDK-bundled Claude against a loopback model
+	OHKIT_TEST_NATIVE=1 uv run --locked pytest tests/test_claude_native.py -q --junitxml=test-results/claude-native.xml
 
 codex-upstream-check: ## Report latest stable Codex version/schema drift (network)
 	uv run --locked python scripts/codex_protocol.py check-upstream

@@ -14,7 +14,12 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = ["pydantic>=2.12,<3", "websockets>=15,<16"]
+dependencies = [
+    "agent-client-protocol>=0.12.1,<0.13",
+    "claude-agent-sdk>=0.2.165,<0.3",
+    "pydantic>=2.12,<3",
+    "websockets>=15,<16",
+]
 
 [project.urls]
 Homepage = "https://ohkit.wh1isper.top"

@@ -1,6 +1,6 @@
 # Repository Guide
 
-ohkit is an independent, pure Python programming interface for agent harnesses. Typed async execution, Workspace operations, Codex app-server control, and application-hosted Codex file/process execution are implemented. Other backend adapters remain specification-only. Read the owning implementation and compatibility documentation rather than treating all accepted target contracts as available features.
+ohkit is an independent, pure Python programming interface for agent harnesses. Typed async execution, Workspace operations, Codex app-server control and hosted I/O, stable ACP with Workspace callbacks, and ordinary Claude SDK execution are implemented. Read the owning implementation and compatibility documentation rather than treating all accepted target contracts as available features.
 
 ## Sources of Truth
 

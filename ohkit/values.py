@@ -97,8 +97,8 @@ class Result:
 class ApprovalChoice:
     """Return an offered choice unchanged; scope is native, not a policy override."""
 
-    kind: Literal["accept", "acceptForSession", "decline", "cancel", "execpolicy", "network", "permissions"]
-    scope: Literal["action", "turn", "session", "persistent"]
+    kind: Literal["accept", "acceptForSession", "decline", "cancel", "execpolicy", "network", "permissions", "native"]
+    scope: Literal["action", "turn", "session", "persistent", "native"]
     native: NativeData | None = field(default=None, repr=False)
 
 
@@ -107,7 +107,7 @@ class ApprovalRequest:
     thread: ThreadRef
     run_id: str
     id: str
-    kind: Literal["command", "file_change", "permissions"]
+    kind: Literal["command", "file_change", "permissions", "tool"]
     item_id: str
     reason: str | None
     choices: tuple[ApprovalChoice, ...]

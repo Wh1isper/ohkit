@@ -31,7 +31,7 @@ sequenceDiagram
     Adapter-->>Observer: interaction settled
 ```
 
-An approval describes the native action, offered choices, and effective scope. A question describes the native question and supported answer shape. Handlers cannot expand a decision's authority beyond what the native request and caller policy permit. Unrepresentable native decision semantics produce an explicit unsupported response or Run failure, never automatic approval.
+An approval describes the native action, offered choices, and effective scope. A native choice/scope retains semantics that cannot be faithfully normalized; callers inspect its namespaced native data rather than treating it as a boolean or assuming persistent authority. A question describes the native question and supported answer shape. Handlers cannot expand a decision's authority beyond what the native request and caller policy permit. Unrepresentable native decision semantics produce an explicit unsupported response or Run failure, never automatic approval.
 
 There is one response owner per request. An observational event does not let another consumer answer the same request. A handler response after cancellation or native request closure is stale and is not applied to a later request. Missing handlers, handler exceptions, and disconnection settle or abort the native request explicitly; none imply consent. The default approval behavior is non-approval, not permission escalation.
 
