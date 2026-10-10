@@ -36,6 +36,8 @@ A Thread has a stable native session UUID, but **each Run owns a fresh SDK clien
 
 This preserves history, not live processes, terminal handles, pending approvals, or the Python object graph. `history_scope` can explicitly identify your storage boundary. The default derives from native executable and home/config directory; it is not an authorization token or distributed ownership lease.
 
+See [history and workspace continuation](continuation.md#claude-native-resume-forkresume-or-selected-handoff) for changed-cwd resume, explicit SDK fork/resume, and native transcript stores. Those paths preserve history; changing cwd does not guarantee removal of old project instructions.
+
 ## Completion and control
 
 The adapter sends exactly one initial input through an asynchronous iterable and drains `receive_messages()` to EOF. It does not use the first `ResultMessage` as a Run-completion shortcut. The SDK owns native background-task accounting, session-state handling, and input closure. Native follow-up Turns can therefore remain inside the same Run. The result is published after SDK cleanup.

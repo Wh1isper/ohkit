@@ -52,6 +52,8 @@ Pass `executor=CodexExecutor(...)` to `new_thread`, with explicit target cwd and
 
 The current native resume/fork requests cannot bind an external executor before startup I/O. Those external operations are rejected, not downgraded to local execution. Registration also affects shared native defaults: use a dedicated app-server and do not reopen external history through the ordinary host-history API. [Workspace](workspace.md#codex-binding) owns these limits; the [hosting example](examples/application-hosted-executor.md) is runnable checkout code.
 
+A separate [copy/inject integration plan](continuation.md#codex-new-external-thread-plus-selected-injection) records native evidence for reconstructing selected dialogue in a new external Thread on another Workspace. It does not add public history-read or injection methods, and is not native executor rebinding.
+
 ## Operational limits
 
 `event_capacity` bounds retained Run observations (default 256). `request_timeout` bounds native request acknowledgement waits; losing an acknowledgement after possible dispatch makes the connection unavailable and raises `UnknownOutcomeError`. `cleanup_timeout` bounds Run interaction/termination settlement and process/connection close operations. A timeout is not proof that native side effects did not occur.

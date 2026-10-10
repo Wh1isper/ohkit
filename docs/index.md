@@ -13,6 +13,7 @@ ohkit is an independent Python programming interface for agent harnesses. Its de
 - [Execution](execution.md): streams, terminal results, active control, and live decisions.
 - [Codex](codex.md): native options, transport ownership, and tested compatibility.
 - [Workspace](workspace.md): provider contracts, resource lifetime, and supported modes.
+- [History and workspace continuation](continuation.md): resume, native fork, and selected copy/inject strategies across backends.
 - [Application-hosted executor](examples/application-hosted-executor.md): runnable authenticated hosting and multiple project routes.
 - [Documentation maintenance](documentation.md): preview, validate, and deploy this site.
 - [Releasing](releasing.md): prepare and publish Python artifacts.

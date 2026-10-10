@@ -71,3 +71,5 @@ The initial bridge supports file/process requests, not optional discovery, files
 **Its cwd is not confinement. Files and commands have the host account's full authority.** Authentication identifies a trusted peer; it does not sandbox commands or provide tenant isolation. Production applications must supply an appropriate provider and secure both native control and executor access. Native history, credentials, configuration, and other unbridged I/O remain on the app-server host.
 
 See the [runnable authenticated host](examples/application-hosted-executor.md) and [Codex validation evidence](codex.md#compatibility-and-validation). [ACP](acp.md) also implements text-file and terminal callbacks over this Workspace interface. [Claude](claude.md) does not accept a supplied Workspace.
+
+For replacing a physical provider or moving a logical conversation to another target, see [history and workspace continuation](continuation.md). The host owns file transfer, native-reference mapping, and history-selection policy; the backend determines whether native resume or selected reconstruction is available.

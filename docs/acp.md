@@ -35,6 +35,8 @@ Each live Thread owns one subprocess and SDK connection. Later Runs on that Thre
 
 `ACPOptions.env` overlays the SDK's trimmed base environment. Supply credentials through your application's environment/configuration policy, never hard-code them. Native stderr is discarded rather than accumulated as an unbounded private log. `history_scope` can identify application-owned history storage; the default hashes launch command, directory, and explicit environment configuration. A reference carries no credentials.
 
+For recreated Workspace providers and new-session handoffs, see [history and workspace continuation](continuation.md#acp-resume-a-compatible-namespace-or-hand-off-explicitly). A callback rebinding is not a portable promise that an agent accepts arbitrary changes to its session cwd.
+
 ## Capability boundaries
 
 | Behavior                                            | Availability                                                          |
