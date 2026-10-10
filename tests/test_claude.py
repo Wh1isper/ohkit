@@ -395,3 +395,59 @@ def test_claude_eof_after_unfinished_followup_is_unknown(peers):
                 assert not thread._available
 
     asyncio.run(exercise())
+
+
+def test_claude_backend_close_stops_existing_thread_admission(peers):
+    async def exercise():
+        backend = await Claude(cleanup_timeout=0.1).__aenter__()
+        thread = await backend.new_thread()
+        closing = asyncio.create_task(backend.close())
+        await asyncio.sleep(0)
+        assert backend._closed
+        try:
+            with pytest.raises(UnavailableError):
+                await thread.run("must not dispatch after close begins")
+        finally:
+            await closing
+        assert not peers
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("terminal", ["completed", "aborted_tools", None])
+def test_claude_eof_settles_interrupt_without_acknowledgement(peers, terminal):
+    async def exercise():
+        async with Claude(cleanup_timeout=0.2, control_timeout=1) as backend:
+            thread = await backend.new_thread()
+            async with thread.stream("start") as run:
+                peer = peers[-1]
+                await peer.user.wait()
+                entered = asyncio.Event()
+                original = peer.write
+
+                async def write(data):
+                    value = json.loads(data)
+                    if value.get("request", {}).get("subtype") == "interrupt":
+                        entered.set()
+                        # Native completion races the control reply; do not ack.
+                        return
+                    await original(data)
+
+                peer.write = write
+                cancelling = asyncio.create_task(run.cancel())
+                await entered.wait()
+                if terminal is None:
+                    await peer.incoming.put(None)
+                else:
+                    await peer.result(terminal_reason=terminal)
+                async with asyncio.timeout(0.5):
+                    await cancelling
+                    async for _ in run:
+                        pass
+                expected = (
+                    "unknown" if terminal is None else "cancelled" if terminal == "aborted_tools" else "completed"
+                )
+                assert (await run.result()).outcome == expected
+                assert peer.closed
+
+    asyncio.run(exercise())

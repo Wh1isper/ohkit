@@ -128,6 +128,8 @@ class Thread:
         self._active: Run | None = None
         self._available = True
         self._closed = False
+        self._closing: asyncio.Task[None] | None = None
+        self._starting: asyncio.Task[None] | None = None
 
     @asynccontextmanager
     async def stream(self, input: Input, *, handlers: Handlers | None = None) -> AsyncGenerator[Run]:
@@ -140,6 +142,7 @@ class Thread:
         run._driver = driver
         self._active = run
         start = asyncio.create_task(driver.start(input))
+        self._starting = start
         try:
             await asyncio.shield(start)
             yield run
@@ -156,6 +159,7 @@ class Thread:
                     await driver.close()
                 finally:
                     self._active = None
+                    self._starting = None
 
             await _settle(asyncio.create_task(cleanup()))
 
@@ -166,12 +170,19 @@ class Thread:
             return await run.result()
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        if self._closing is None:
+            self._closed = True
+            self._closing = asyncio.create_task(self._close(self._active, self._starting))
+        await _settle(self._closing)
+
+    async def _close(self, run: Run | None, start: asyncio.Task[None] | None) -> None:
         try:
-            if self._active is not None:
-                assert self._active._driver is not None
-                await self._active._driver.close()
+            # Capture ownership before scheduling: stream cleanup can clear the
+            # live slot while this close is settling the admitted submission.
+            if start is not None:
+                await asyncio.gather(start, return_exceptions=True)
+            if run is not None:
+                assert run._driver is not None
+                await run._driver.close()
         finally:
             await self._binding.close()

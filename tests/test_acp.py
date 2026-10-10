@@ -235,3 +235,81 @@ def test_acp_overflow_settles_permission_without_admitting_late_handlers(pending
             assert was_withdrawn == pending
 
     asyncio.run(exercise())
+
+
+def test_acp_backend_close_stops_admission_before_waiting_for_open_lock():
+    async def exercise():
+        backend = await ACP(options=options()).__aenter__()
+        thread = await backend.new_thread(cwd="/native")
+        await backend._lock.acquire()
+        closing = asyncio.create_task(backend.close())
+        await asyncio.sleep(0)
+        assert backend._closed
+        try:
+            with pytest.raises(UnavailableError):
+                await thread.run("not dispatched while shutdown waits for another open")
+        finally:
+            backend._lock.release()
+            await closing
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("handler_fails", [False, True])
+def test_acp_shutdown_does_not_reply_after_delayed_handler_finalizer(handler_fails, monkeypatch):
+    from ohkit.backends.acp.backend import _Binding
+
+    async def exercise():
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def handler(request):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                while not release.is_set():
+                    try:
+                        await release.wait()
+                    except asyncio.CancelledError:
+                        pass
+                if handler_fails:
+                    raise RuntimeError("handler finalizer failed")
+
+        permission = _Binding.request_permission
+        callbacks = []
+
+        async def observed_permission(self, *args, **kwargs):
+            callbacks.append(asyncio.current_task())
+            return await permission(self, *args, **kwargs)
+
+        monkeypatch.setattr(_Binding, "request_permission", observed_permission)
+        backend = await ACP(options=options()).__aenter__()
+        thread = await backend.new_thread(cwd="/native")
+        binding = thread._binding
+
+        async def work():
+            async with thread.stream("permission", handlers=Handlers(approval=handler)):
+                await entered.wait()
+
+        working = asyncio.create_task(work())
+        await entered.wait()
+        try:
+            async with asyncio.timeout(2):
+                while binding.closing is None:
+                    await asyncio.sleep(0.01)
+            release.set()
+            done, _ = await asyncio.wait((working,), timeout=2)
+            settled = bool(done)
+        finally:
+            release.set()
+            # Keep a regression bounded: a second cancellation breaks the old
+            # SDK send wait after the handler has returned a stale denial.
+            for callback in callbacks:
+                callback.cancel()
+            results = await asyncio.gather(working, return_exceptions=True)
+            await asyncio.gather(backend.close(), return_exceptions=True)
+        assert settled, "SDK shutdown waited forever for a reply queued after its sender closed"
+        assert isinstance(results[0], UnknownOutcomeError)
+        assert not thread._available
+
+    asyncio.run(exercise())

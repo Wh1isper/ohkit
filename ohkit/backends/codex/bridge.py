@@ -477,7 +477,7 @@ class _Process:
         self.failure: str | None = None
         self.closed = False
         self.changed = asyncio.Event()
-        self.writes: set[str] = set()
+        self.writes: dict[str, str | None] = {}
         self.stdin_lock = asyncio.Lock()
         self.ready = asyncio.Event()
         self.pump: asyncio.Task[None] | None = None
@@ -486,15 +486,23 @@ class _Process:
         async with self.stdin_lock:
             data = _bytes(request.chunk)
             if request.write_id in self.writes:
-                return {"status": "accepted"}
+                status = self.writes[request.write_id]
+                if status is None:
+                    raise ProtocolError("Previous stdin write outcome is unknown; it cannot be replayed")
+                return {"status": status}
             if self.connection.closing or self.handle is None or self.exit_code is not None:
                 return {"status": "stdinClosed"}
+            # Reserve identity before provider dispatch: failure may follow an
+            # applied write. Only a known result can be acknowledged on retry.
+            self.writes[request.write_id] = None
             try:
                 await self.handle.write(data)
             except (BrokenPipeError, ConnectionResetError):
-                return {"status": "stdinClosed"}
-            self.writes.add(request.write_id)
-            return {"status": "accepted"}
+                status = "stdinClosed"
+            else:
+                status = "accepted"
+            self.writes[request.write_id] = status
+            return {"status": status}
 
     async def close(self) -> None:
         self.changed.set()

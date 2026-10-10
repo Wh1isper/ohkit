@@ -133,6 +133,8 @@ class ACP:
     async def close(self) -> None:
         if self._closing is None:
             self._closed = True
+            for binding in self._threads.values():
+                binding.thread._available = False
             self._closing = asyncio.create_task(self._close())
         await _settle(self._closing)
 
@@ -439,9 +441,15 @@ class _Driver:
             return wire.RequestPermissionResponse(outcome=wire.AllowedOutcome(outcome="selected", option_id=selected))
         except asyncio.CancelledError:
             self.run._emit(InteractionEvent(self.run.thread, self.run.id, request.id, "withdrawn"))
+            if self.binding.closing is not None:
+                # SDK shutdown has stopped its sender. Propagate cancellation
+                # instead of queuing a denial that can never be delivered.
+                raise
             return denied
         except Exception:
             self.run._emit(InteractionEvent(self.run.thread, self.run.id, request.id, "failed"))
+            if self.binding.closing is not None:
+                raise asyncio.CancelledError from None
             return denied
         finally:
             self.decisions.discard(task)

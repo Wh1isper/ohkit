@@ -35,6 +35,8 @@ An approval describes the native action, offered choices, and effective scope. A
 
 There is one response owner per request. An observational event does not let another consumer answer the same request. A handler response after cancellation or native request closure is stale and is not applied to a later request. Missing handlers, handler exceptions, and disconnection settle or abort the native request explicitly; none imply consent. The default approval behavior is non-approval, not permission escalation.
 
+Handlers must cooperate with cancellation and bound their own finalizers. A native cleanup timeout cannot forcibly terminate arbitrary application code. The adapter must not call a still-owned handler settled merely because that timeout expired.
+
 A live wait is still inside the active Run. It is not a portable suspended state or a durable task that can be answered after restoring history. Applications needing durable human workflows own the surrounding persistence and must use only continuation semantics actually offered by the backend.
 
 ## Backpressure and Failure

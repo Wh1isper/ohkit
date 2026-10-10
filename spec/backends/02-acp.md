@@ -14,7 +14,7 @@ Stable ACP has no general active-steering primitive with ohkit's accepted-input 
 
 The adapter owns one agent subprocess and SDK connection per live Thread. History continuation uses stable `session/resume`, or `session/load` when only load is advertised. Replayed history is not new Run output. `session/fork` remains unstable in the supported SDK and is unavailable even when advertised. The initial adapter accepts text inputs only.
 
-Permission requests route to the caller's typed handler. ACP choices use native kind and scope, retaining the exact option ID, label, and `allow_once`, `allow_always`, `reject_once`, or `reject_always` value; an `always` hint does not invent a known session or persistent scope. Only an offered choice can be returned. Missing, failed, or cancelled handlers return the native cancelled outcome.
+Permission requests route to the caller's typed handler. ACP choices use native kind and scope, retaining the exact option ID, label, and `allow_once`, `allow_always`, `reject_once`, or `reject_always` value; an `always` hint does not invent a known session or persistent scope. Only an offered choice can be returned. Missing, failed, or cancelled handlers return the native cancelled outcome while the connection can still reply. During binding shutdown, cancellation propagates into the SDK callback task instead of attempting a reply through closed routing.
 
 An ACP prompt has no separate acceptance receipt. Entering a Run admits its one prompt locally; the final prompt response supplies its outcome. Native rejection produces a failed result, while lost response evidence produces unknown. All stable stop reasons other than `cancelled` represent normal native termination and remain available as the result's native status; this does not assert goal fulfillment.
 
@@ -36,7 +36,7 @@ Text file projection preserves line endings and rejects invalid encoding rather 
 
 ## Lifetime and Coverage
 
-Callbacks carry native session identity, not an ohkit Run ID. Terminal handles remain valid until release or binding close; foreground prompt completion is not a terminal-release fence. Cancellation keeps callback routing alive for cleanup. Conversation-scoped handles are not all killed merely because one Run ends.
+Callbacks carry native session identity, not an ohkit Run ID. Terminal handles remain valid until release or binding close; foreground prompt completion is not a terminal-release fence. Cancellation keeps callback routing alive for cleanup. Conversation-scoped handles are not all killed merely because one Run ends. Binding shutdown also owns in-flight launches whose callbacks were cancelled. A process returned after shutdown begins is closed rather than published as a new terminal. Successful disposal rejects the creation without failing cleanup; a late process cleanup failure reaches the binding's close caller and remains visible on repeated close.
 
 Only implemented callbacks are advertised. ACP agents may use these client capabilities; their presence does not guarantee that every native file or command path is delegated. An application requiring stronger coverage must verify the chosen agent or enforce confinement outside the adapter.
 

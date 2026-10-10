@@ -176,6 +176,8 @@ class Claude:
     async def close(self) -> None:
         if self._closing is None:
             self._closed = True
+            for binding in self._threads.values():
+                binding.thread._available = False
             self._closing = asyncio.create_task(self._close())
         await _settle(self._closing)
 
@@ -216,6 +218,7 @@ class _Driver:
         self.disconnecting: asyncio.Task[None] | None = None
         self.decisions: set[asyncio.Task[ApprovalChoice]] = set()
         self.finished = False
+        self.native_finished = asyncio.Event()
         self.output = ""
         self.submitted = False
         self.forced_close = False
@@ -305,6 +308,7 @@ class _Driver:
                 self.binding.thread._available = False
         finally:
             self.finished = True
+            self.native_finished.set()
             for decision in self.decisions:
                 decision.cancel()
             await asyncio.gather(*self.decisions, return_exceptions=True)
@@ -456,8 +460,21 @@ class _Driver:
 
     async def _cancel(self) -> None:
         assert self.client is not None
-        async with asyncio.timeout(self.binding.backend.control_timeout):
-            await self.client.interrupt()
+        if self.finished:
+            return
+        interrupt = asyncio.create_task(self.client.interrupt())
+        finished = asyncio.create_task(self.native_finished.wait())
+        try:
+            async with asyncio.timeout(self.binding.backend.control_timeout):
+                done, _ = await asyncio.wait((interrupt, finished), return_when=asyncio.FIRST_COMPLETED)
+                if interrupt in done:
+                    interrupt.result()
+                # SDK EOF closes reply routing. Native completion wins over an
+                # interrupt whose acknowledgement can no longer arrive.
+        finally:
+            interrupt.cancel()
+            finished.cancel()
+            await asyncio.gather(interrupt, finished, return_exceptions=True)
 
     def overflow(self) -> None:
         if self.cancellation is None and not self.finished:

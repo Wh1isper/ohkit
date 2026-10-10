@@ -49,9 +49,9 @@ The backend remains responsible for native request routing while the caller hand
 ## Python Interaction Shape
 
 ```python
-# Conceptual usage; not an API available in the bootstrap package.
+# Usage shape; the application hosts and authorizes the executor endpoint.
 async with Codex(options=codex_options) as backend:
-    thread = await backend.new_thread(workspace=workspace, cwd="/project")
+    thread = await backend.new_thread(executor=executor_endpoint, cwd="/project", options=thread_options)
     async with thread.stream("Inspect and fix the failing test.", handlers=handlers) as run:
         async for event in run:
             await observe(event)

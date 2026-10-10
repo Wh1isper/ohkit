@@ -147,3 +147,52 @@ def test_workspace_text_projection_strict_encoding_and_preserved_lines(tmp_path)
         await workspace.close()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel_create", [False, True])
+@pytest.mark.parametrize("close_fails", [False, True])
+def test_workspace_close_observes_late_launch_cleanup(cancel_create, close_fails):
+    async def exercise():
+        entered, release = asyncio.Event(), asyncio.Event()
+        error = OSError("process termination unconfirmed")
+        calls = 0
+
+        class LateProcess:
+            async def close(self):
+                nonlocal calls
+                calls += 1
+                if close_fails:
+                    raise error
+
+        class Workspace:
+            async def start_process(self, request):
+                entered.set()
+                await release.wait()
+                return LateProcess()
+
+        workspace = WorkspaceCallbacks(Workspace(), "/target", 100, 1)
+        creating = asyncio.create_task(workspace.create(ProcessRequest(("command",)), None))
+        await entered.wait()
+        if cancel_create:
+            creating.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await creating
+        closing = asyncio.create_task(workspace.close())
+        await asyncio.sleep(0)
+        assert workspace.closed and not closing.done()
+        release.set()
+        results = await asyncio.gather(creating, closing, return_exceptions=True)
+        assert calls == 1
+        if close_fails:
+            assert isinstance(results[1], ExceptionGroup)
+            assert results[1].exceptions == (error,)
+            with pytest.raises(ExceptionGroup) as repeated:
+                await workspace.close()
+            assert repeated.value is results[1]
+        else:
+            assert results[1] is None
+            assert isinstance(results[0], asyncio.CancelledError if cancel_create else RequestError)
+            await workspace.close()
+        assert calls == 1
+
+    asyncio.run(exercise())
