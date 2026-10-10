@@ -82,4 +82,20 @@ The tests exercise the real Python SDK against an independent deterministic stdi
 uv run --locked pytest tests/test_acp.py tests/test_acp_workspace.py
 ```
 
+### Tested third-party agent
+
+The opt-in native suite uses [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) **0.89.0**, with its locked JavaScript SDK/runtime dependencies in `tests/fixtures/acp/package-lock.json`. It runs the actual agent and Claude runtime against a deterministic loopback model with isolated home/configuration and no production credentials. It covers streamed output, repeated Runs, reopened history, cancellation and reuse, and allow/deny decisions controlling real file writes and shell commands.
+
+In these tests, this agent performs Read/Write/Bash through its native tools even when client Workspace capabilities are advertised: no Workspace file or process callbacks occur. Use this configuration for native local I/O, not for remote Workspace delegation or confinement. The deterministic ACP peer separately validates the adapter's callback paths; it does not turn this agent into a callback-based executor.
+
+```bash
+# Node.js 24; installs only the development fixture, not an ohkit runtime dependency.
+make acp-native-test
+
+# With your own installed and authenticated agent:
+uv run python examples/acp.py --cwd /path/to/project -- claude-agent-acp
+```
+
+The example declines permission requests reaching its handler; native auto-approved operations remain under the agent's policy. Use Ctrl-C to stop the application and settle the active stream. [Installed-wheel validation](releasing.md#local-rehearsal) runs these same paths outside the source checkout. These results establish interoperability for the tested version and paths, not model quality or every ACP agent.
+
 See [execution](execution.md) for shared lifecycle and [Workspace](workspace.md) for provider semantics.

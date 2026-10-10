@@ -1,18 +1,28 @@
 ---
 title: Getting started
-description: Run a configured Codex app-server through typed asynchronous execution.
+description: Install ohkit and run Codex, an ACP agent, or Claude through typed asynchronous execution.
 ---
 
 ## Requirements and availability
 
-Use Python 3.13 or newer. This source checkout implements Thread/Run execution and Codex control. Earlier published bootstrap releases expose version metadata only; install the implementation from this checkout until a release containing it is available.
+Use Python 3.13 or newer. ohkit provides one typed Thread/Run interface with Codex, ACP, and Claude backends. Earlier published bootstrap releases expose version metadata only; install the implementation from this checkout or a validated runtime-bearing wheel until the first runtime release is published.
 
-Codex must be installed separately and configured with access to its native model provider. Use the tested native version listed in [Codex compatibility](codex.md#compatibility-and-validation). The default installation includes the `websockets` dependency for WebSocket control; no extra is required. Documentation tools are separate developer dependencies.
+All three backend dependencies are included in the default installation; no extras are required. Your application supplies native credentials and configuration. Node.js is not required to build ohkit; a chosen ACP agent may require it at runtime.
+
+| Backend             | Native setup                                             | Supplied Workspace                                             |
+| ------------------- | -------------------------------------------------------- | -------------------------------------------------------------- |
+| [Codex](codex.md)   | Install and configure the tested Codex executable        | Application-hosted external executor                           |
+| [ACP](acp.md)       | Install and configure a selected ACP agent               | Optional file/terminal callbacks; actual use is agent-specific |
+| [Claude](claude.md) | Configure credentials for the SDK-bundled Claude runtime | Not supported                                                  |
+
+See each backend guide for its tested baseline and capability limits. The example below starts with Codex; runnable [ACP](https://github.com/Wh1isper/ohkit/blob/main/examples/acp.py) and [Claude](https://github.com/Wh1isper/ohkit/blob/main/examples/claude.py) examples use the same streaming and result model.
 
 ## Install from source
 
 ```bash
 python -m pip install .
+# Or install a validated build without a source checkout:
+python -m pip install /path/to/ohkit-<version>-py3-none-any.whl
 ```
 
 ## Result-only execution
@@ -63,6 +73,6 @@ Consume a Run's stream once before calling `result()`. For result-only work, `th
 ## Next steps
 
 - [Execution](execution.md): ownership, steering, cancellation, events, and handlers.
-- [Codex](codex.md): options, native policy, transport lifetime, and compatibility evidence.
+- [Codex](codex.md), [ACP](acp.md), and [Claude](claude.md): native setup, policy, capability differences, and compatibility evidence.
 - [Runnable example](https://github.com/Wh1isper/ohkit/blob/main/examples/codex.py): streaming with an explicit non-approval handler and history continuation.
 - [Workspace](workspace.md) and [application-hosted executor](examples/application-hosted-executor.md): typed provider I/O and a runnable authenticated bridge for new Codex Threads.

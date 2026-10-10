@@ -1,12 +1,13 @@
 [project]
 name = "ohkit"
 version = "0.0.0"
-description = "A unified Python API for coding agents."
+description = "A unified Python programming interface for agent harnesses."
 readme = "README.md"
 license = "MIT AND Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "third-party/codex/LICENSE", "third-party/codex/NOTICE"]
 requires-python = ">=3.13"
 authors = [{ name = "Converge AI Labs" }]
+maintainers = [{ name = "Wh1isper" }]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",

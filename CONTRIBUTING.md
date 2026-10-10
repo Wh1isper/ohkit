@@ -28,6 +28,8 @@ Use feature branches and pull requests for changes to `main`. Main permits squas
 | `make automation-test`           | PR overview tests                                              |
 | `make docs-build`                | Static documentation, navigation, and internal links           |
 | `make docs-serve`                | Local documentation preview                                    |
+| `make acp-native-test`           | Locked third-party ACP agent with a loopback model             |
+| `make installed-test`            | All native suites against a wheel outside the source checkout  |
 
 Choose local checks from actual changed behavior. Run downstream checks when a shared change affects them. Reuse passing checks while relevant inputs are unchanged. CI runs the complete applicable gates. Do not claim unexecuted checks passed or bypass hooks. `make format` operates on tracked files, so newly created files must be staged before the all-files hook pass.
 
